@@ -131,7 +131,9 @@ main { flex: 1; min-height: 0; display: flex; }
 .metric-side { flex: 0 0 auto; white-space: nowrap; text-align: right; }
 .metric-side .st-metric__value { font-size: clamp(16px, 1.5vw, 27px); color: color-mix(in srgb, var(--st-warn) 62%, transparent); }
 .metric-graphs { display: flex; flex-direction: column; gap: var(--st-s-2); margin-top: auto; padding-top: var(--st-s-3); }
-.metric-graph { display: flex; flex-direction: column; gap: 3px; flex: 1 1 0; min-height: 34px; }
+/* A row of the graphs panel keeps its own lines: a row squeezed under its content let the graph below it draw over the
+   numbers of the one above. They still share whatever the card has left over. */
+.metric-graph { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-height: min-content; }
 .metric-graph .st-metric__spark { flex: 1 1 auto; min-height: 30px; height: auto; }
 .metric-graph__foot { display: flex; justify-content: space-between; align-items: baseline; gap: var(--st-s-2);
                       font-size: var(--st-fs-xs); color: var(--st-ink-muted); font-variant-numeric: tabular-nums; }
