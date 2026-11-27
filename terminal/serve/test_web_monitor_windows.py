@@ -164,9 +164,12 @@ process.stdout.write(JSON.stringify([$('sn-sp-power').textContent, $('sn-sp-powe
     def test_two_graph_rows_share_a_card_without_drawing_over_each_other(self):
         css = (WEB / "app.css").read_text(encoding="utf-8")
         app = (WEB / "app.js").read_text(encoding="utf-8")
-        self.assertIn("min-height: min-content", css,
-                      "a row of graphs cannot shrink under its own lines - which is how the lower graph came to sit on "
-                      "the numbers of the one above it")
+        self.assertIn("min-height: 52px", css,
+                      "a row of graphs reserves the height of its own line of numbers, in pixels: the lower row came "
+                      "to sit on the numbers of the one above when the row could shrink under them")
+        self.assertNotIn("min-height: min-content", css,
+                         "and never from the sparkline's own drawing box - that minimum is its width over 3.125, which "
+                         "grows every row and doubles the panels")
         self.assertNotIn('statLine("sp-vram"', app, "VRAM prints no numbers under its graph")
         self.assertNotIn('statLine("sp-disk"', app, "nor does the disk read")
         self.assertNotIn("avg ${f(r.avg)}", app, "a mean over the minute of samples is noise where the shape is the point")
