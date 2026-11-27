@@ -2033,11 +2033,7 @@ class Telemetry:
             s["cpu"] = self.fallback.cpu()
             s["ram_used"], s["ram_total"] = self.fallback.ram()
         if self.mem_facts is None:                          # once: a machine's memory does not change while it runs
-            self.mem_facts = memory_facts() if os.name == "nt" else {
-                "ram_note": "What the sticks themselves are is read from the machine's firmware, and this operating "
-                            "system hands that out only to root."}
-            if os.name == "nt" and not self.mem_facts:      # a Windows whose WMI did not answer says so too
-                self.mem_facts = {"ram_note": "The machine's firmware did not answer the query for its memory sticks."}
+            self.mem_facts = memory_facts() if os.name == "nt" else {}
         s.update(self.mem_facts)
         s["disk_read_mb"], s["disk_write_mb"] = self._disk()
         s["cpu_temp"] = self.cpu_temp.read()

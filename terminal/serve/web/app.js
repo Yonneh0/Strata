@@ -506,7 +506,7 @@ function statLine(id, values, d, unit, o) {
 // room, these say what the room is and how fast it runs - a stick rated faster than the machine runs it is worth
 // knowing about, because it is a setting and not a limit
 function ramSticks(hw) {
-  if (!hw.ram_sticks) return hw.ram_note || "";   // with nothing from the firmware, say why instead of printing a blank
+  if (!hw.ram_sticks) return "";   // some operating systems keep the sticks behind root: the line stays blank
   const speed = hw.ram_mt_s ? `${hw.ram_type || "DDR"}-${hw.ram_mt_s}` : (hw.ram_type || "");
   const chan = hw.ram_channels ? ` · ${["", "single", "dual", "triple", "quad"][hw.ram_channels] || hw.ram_channels} channel` : "";
   return `${hw.ram_sticks} × ${hw.ram_stick_gib} GB ${speed}${chan}`.replace(/ +/g, " ");
