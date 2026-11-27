@@ -159,7 +159,6 @@ async function loadHealth() {
 
 // ------------------------------------------------------------------ Monitor
 const METRICS = [
-  {key: "model", label: "Model", icon: "info", unit: ""},
   // the two speeds in the page's own state colours: writing the answer is the green of "Generating", reading the
   // prompt the blue of "Reading"; the line under them is the PCIe link the speed is bound by
   {key: "speed", label: "Speed", icon: "gauge", unit: "t/s", series: "tok_s",
@@ -176,18 +175,20 @@ const METRICS = [
    graphs: [{id: "sp-vram", over: "sp-vram-clock", overTone: "warn", cap: [["In use", ""], ["Memory clock", "warn"]]}]},
   // the temperature that had a card of its own lives here now, under the power that makes it
   {key: "power", label: "GPU Power", icon: "bolt", unit: "W", series: "gpu_power",
-   graphs: [{id: "sp-power", cap: [["Power", ""]]}, {id: "sp-power-temp", tone: "warn", cap: [["Temperature", "warn"]], now: true}]},
+   graphs: [{id: "sp-power", cap: [["Power", ""]]}, {id: "sp-power-temp", tone: "danger", cap: [["Temperature", "danger"]], now: true}]},
   {key: "cpu", label: "CPU", icon: "cpu", unit: "%", series: "cpu", max: 100,
-   graphs: [{id: "sp-cpu", cap: [["Busy", ""]]}, {id: "sp-cpu-temp", tone: "warn", cap: [["Temperature", "warn"]], now: true}]},
+   graphs: [{id: "sp-cpu", cap: [["Busy", ""]]}, {id: "sp-cpu-temp", tone: "danger", cap: [["Temperature", "danger"]], now: true}]},
+  // the machine's own memory: how much of it is in use, and what the sticks say they are running at - the experts'
+  // cache lives here too, and a share that runs out is the machine starting to write its memory to disk
+  {key: "ram", label: "Memory", icon: "memory", unit: "GB", series: "ram_used",
+   graphs: [{id: "sp-ram", cap: [["In use", ""]]}]},
   {key: "disk", label: "Disk read", icon: "disk", unit: "MB/s", series: "disk_read_mb", tone: "info",
    graphs: [{id: "sp-disk", tone: "info", cap: [["Read", "info"]]}]},
 ];
 $("metrics").innerHTML = METRICS.map((m) => `
   <div class="st-card metric-card" data-key="${m.key}"><div class="st-metric">
     <span class="st-metric__label" id="ml-${m.key}"${m.hint ? ` title="${esc(m.hint)}"` : ""}>${icon(m.icon, "st-icon st-icon--sm")}${esc(m.label)}</span>
-    ${m.key === "model" ? `<span class="st-metric__value model-card__name" id="mv-model">–</span>
-    <span class="st-metric__sub" id="ms-model"></span><div class="model-card__facts" id="model-facts"></div>`
-    : m.key === "speed" ? `<div class="metric-values speed-values">
+    ${m.key === "speed" ? `<div class="metric-values speed-values">
       <div><span class="st-metric__value" id="mv-speed">-</span><span class="st-metric__sub" id="ms-speed">Decode</span><span class="st-metric__sub speed-range" id="sr-speed"></span></div>
       <div class="speed-prefill"><span class="st-metric__value" id="mv-prefill">-</span><span class="st-metric__sub" id="ms-prefill">Prefill</span><span class="st-metric__sub speed-range" id="sr-prefill"></span></div>
     </div>`
@@ -501,6 +502,27 @@ function statLine(id, values, d, unit, o) {
   el.title = `${op.tip ? `${op.tip} ` : ""}The last ${r.n} seconds the server keeps (a sample each second) - the same window the graph above is drawn from.`;
 }
 /* A second printed number beside a card's big one: the SM clock over the load, the memory clock over the VRAM. */
+// the sticks themselves, from the machine's firmware: the share of memory in use says a machine is running out of
+// room, these say what the room is and how fast it runs - a stick rated faster than the machine runs it is worth
+// knowing about, because it is a setting and not a limit
+function ramSticks(hw) {
+  if (!hw.ram_sticks) return "";
+  const speed = hw.ram_mt_s ? `${hw.ram_type || "DDR"}-${hw.ram_mt_s}` : (hw.ram_type || "");
+  const chan = hw.ram_channels ? ` · ${["", "single", "dual", "triple", "quad"][hw.ram_channels] || hw.ram_channels} channel` : "";
+  return `${hw.ram_sticks} × ${hw.ram_stick_gib} GB ${speed}${chan}`.replace(/ +/g, " ");
+}
+function ramSticksTip(hw) {
+  if (!hw.ram_sticks) return "";
+  let s = `From the machine's firmware: ${hw.ram_sticks} stick${hw.ram_sticks > 1 ? "s" : ""} of ${hw.ram_stick_gib} GB`
+        + (hw.ram_type ? ` ${hw.ram_type}` : "")
+        + (hw.ram_mt_s ? `, running at ${hw.ram_mt_s} MT/s` : "");
+  if (hw.ram_channels) s += `, one in each of ${hw.ram_channels} channels`;
+  if (hw.ram_rated_mt_s && hw.ram_mt_s && hw.ram_rated_mt_s > hw.ram_mt_s) {
+    s += ` - the sticks are rated ${hw.ram_rated_mt_s} MT/s, so this machine is not running its memory at the speed they are made for`;
+  }
+  return s + ".";
+}
+
 function setSide(card, id, value, unit, sub, why) {
   const v = $(`mv-${card}-${id}`);
   if (!v) return;
@@ -694,13 +716,23 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   spark("sp-gpu-clock", h.gpu_clock_mhz, hw.gpu_clock_max_mhz);
   setMetric("vram", hw.gpu_mem_used == null ? null : gb(hw.gpu_mem_used), hw.gpu_mem_total ? `/ ${gb(hw.gpu_mem_total, 0)} GB` : "GB",
             multi ? per((g) => (g.mem_used == null ? "–" : `${gb(g.mem_used)} GB`))
-                  : eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached` : (st.gpu_note ? "not available on Windows AMD yet" : ""));
+                  : eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached${eng.expert_cache_mib ? ` · ${gb(eng.expert_cache_mib * 1048576)} GB` : ""}`
+                  : (st.gpu_note ? "not available on Windows AMD yet" : ""));
   spark("sp-vram", h.gpu_mem_used, hw.gpu_mem_total);
   statLine("sp-vram", h.gpu_mem_used, 1, " GB", {div: 1073741824});
   setSide("vram", "clock", hw.gpu_mem_clock_mhz, "MHz", hw.gpu_mem_clock_max_mhz ? `of ${fmt(hw.gpu_mem_clock_max_mhz)}`
         : unread(hw.gpu_mem_clock_mhz) ? "not available" : "", unread(hw.gpu_mem_clock_mhz) ? st.gpu_note
         : `The fastest this card's memory runs is ${fmt(hw.gpu_mem_clock_max_mhz || 0)} MHz. The yellow line over the VRAM graph is the same series.`);
   spark("sp-vram-clock", h.gpu_mem_clock_mhz, hw.gpu_mem_clock_max_mhz);
+  // the machine's own memory (see the card's place in METRICS): the share in use, and the sticks that hold it - the
+  // share says whether the machine is running out of room, the firmware's numbers say what that room is and how fast
+  // it runs
+  const ramTot = hw.ram_total || 0;
+  setMetric("ram", hw.ram_used == null || !ramTot ? null : gb(hw.ram_used), ramTot ? `/ ${gb(ramTot, 0)} GB` : "GB",
+            ramSticks(hw), ramSticksTip(hw));
+  spark("sp-ram", h.ram_used, ramTot);
+  statLine("sp-ram", ramTot ? h.ram_used : [], 0, "%", {div: ramTot ? ramTot / 100 : 1,
+          none: ramTot ? "" : "no reading", noneTitle: "This server gives no reading of the machine's memory."});
   // the power card, and the temperature that had a card of its own under it: the watts in and the degrees out are one
   // story, and on eight gigabytes they turn on the same thing
   setMetric("power", hw.gpu_power == null ? null : fmt(hw.gpu_power), "W",
@@ -737,11 +769,13 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
                    none: unread(hw.gpu_pcie_rx_mb) ? "not available" : "", noneTitle: st.gpu_note || ""};
   spark("sp-gpu-pcie", h.gpu_pcie_rx_mb);
   statLine("sp-gpu-pcie", h.gpu_pcie_rx_mb, bigPcie ? 1 : 0, bigPcie ? " GB/s" : " MB/s", Object.assign({now: true}, pcieOpt));
-  setMetric("cpu", hw.cpu == null ? null : fmt(hw.cpu), "%", st.threads ? `${st.cores ? `${st.cores} cores · ` : ""}${st.threads} threads` : "");
+  // the processor's name beside its load, as the GPU's stands on the load card: which chip these degrees and this
+  // share of busy time belong to is the first thing to know about a laptop's numbers
+  setMetric("cpu", hw.cpu == null ? null : fmt(hw.cpu), "%",
+            [st.cpu_name, st.threads ? `${st.cores ? `${st.cores} cores · ` : ""}${st.threads} threads` : null].filter(Boolean).join(" · "));
+  $("ms-cpu").title = st.cpu_note || "";
   spark("sp-cpu", h.cpu, 100);
   statLine("sp-cpu", h.cpu, 0, "%");
-  // the processor's own degrees, when this machine's sensors give them: on Linux that is the kernel's hwmon chip, and
-  // a Windows that keeps the number to its embedded controller says so rather than showing a number nobody read
   // the processor's own degrees, when the machine gives them: Linux from the kernel's hwmon chip, Windows 11 24H2 from
   // its ACPI thermal zone - a zone that follows the processor, but the zone's sensor and not the die, and its tooltip
   // says which of the two the number came from
@@ -765,44 +799,33 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   // power and temperature averages (#4968); after the cards block above so that block stays self-contained
   sampleHw(hw, !!live.state && live.state !== "idle" && live.state !== "unloaded", `${totals && totals.since}|${eng.model || ""}`);
 
-  // the model card (#4968, from PR #4968 by noahark): which model this is (the name appears nowhere else on this tab) and the averages of
-  // the server's own totals since it started. Tooltips are plain title= text, like the rest of this tab.
-  $("ml-model").title = "Which model this server runs. Apps ask for it by this exact name.";
-  $("mv-model").textContent = eng.model || "–";
-  $("mv-model").title = eng.model || "";
-  $("ms-model").textContent = [eng.max_context ? `${ctxfmt(eng.max_context)} context` : null,
-                               eng.version ? `engine v${eng.version}` : null].filter(Boolean).join(" · ");
-  $("ms-model").title = "The context window this model runs with, and the engine's version.";
-  const avg = [];
+  // the model and the run's averages, on the state card now: what this server is, what it runs with, and what it has
+  // been doing since it started - one line, because it reads as one sentence.  Tooltips are plain title= text, like
+  // the rest of this tab (#4968, from PR #4968 by noahark).
+  const sf = (k, v, tip) => `<span class="sm-f"${tip ? ` title="${esc(tip)}"` : ""}><i>${esc(k)}</i> ${esc(v)}</span>`;
+  const bits = [`<span class="sm-name" title="${esc(eng.model || "")}">${esc(eng.model || "–")}</span>`,
+                eng.max_context ? sf("context", ctxfmt(eng.max_context), "The context window this model runs with. Apps ask for the model by the name beside it.") : null,
+                eng.version ? sf("engine", `v${eng.version}`, "The engine serving it.") : null];
   if (totals && totals.requests) {
     const read = totals.prompt_tokens - totals.reused;
-    avg.push(["Decode avg", totals.decode_ms > 0 && totals.output_tokens ? `${fmt(totals.output_tokens / (totals.decode_ms / 1000), 1)} t/s` : "–",
-              "Average answer speed since the server started: answer tokens divided by the time spent writing them. Waiting in the queue and reading the prompt are not counted."]);
-    avg.push(["Prefill avg", totals.prompt_ms > 0 && read > 0 ? `${fmt(read / (totals.prompt_ms / 1000))} t/s` : "–",
-              "Average prompt speed since the server started, counting only the tokens that were really read. What came from the cache is left out."]);
-    avg.push(["Per request", `${fmt(totals.prompt_tokens / totals.requests)} in · ${fmt(totals.output_tokens / totals.requests, 1)} out`,
-              "The average prompt and answer length of one request."]);
-    avg.push(["Prompt reused", totals.prompt_tokens ? `${fmt((100 * totals.reused) / totals.prompt_tokens)}%` : "–",
-              "How much of each prompt came from the engine's cache instead of being read again. High means follow-ups are fast."]);
+    bits.push(sf("decode", totals.decode_ms > 0 && totals.output_tokens ? `${fmt(totals.output_tokens / (totals.decode_ms / 1000), 1)} t/s` : "–",
+                 "Average answer speed since the server started: answer tokens divided by the time spent writing them. Waiting in the queue and reading the prompt are not counted."));
+    bits.push(sf("prefill", totals.prompt_ms > 0 && read > 0 ? `${fmt(read / (totals.prompt_ms / 1000))} t/s` : "–",
+                 "Average prompt speed since the server started, counting only the tokens that were really read. What came from the cache is left out."));
+    bits.push(sf("per request", `${fmt(totals.prompt_tokens / totals.requests)} in · ${fmt(totals.output_tokens / totals.requests, 1)} out`,
+                 "The average prompt and answer length of one request."));
+    bits.push(sf("reused", totals.prompt_tokens ? `${fmt((100 * totals.reused) / totals.prompt_tokens)}%` : "–",
+                 "How much of each prompt came from the engine's cache instead of being read again. High means follow-ups are fast."));
     const t0 = new Date(totals.since * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
-    avg.push(["Since", `${t0} · ${fmt(totals.requests)} requests`,
-              "When this server began counting, and how many requests it has served. Loading or unloading the model does not reset it."]);
+    bits.push(sf("since", `${t0} · ${fmt(totals.requests)} requests`,
+                 "When this server began counting, and how many requests it has served. Loading or unloading the model does not reset it."));
+  } else {
+    bits.push(`<span class="sm-f"><i>Averages start with the first request.</i></span>`);
   }
-  $("model-facts").innerHTML = avg.length
-    ? avg.map(([k, v, tip]) => `<span class="mf-k" title="${esc(tip)}">${esc(k)}</span><span class="mf-v">${esc(v)}</span>`).join("")
-    : `<span class="mf-k mf-k--wide">Averages start with the first request.</span>`;
+  $("state-model").innerHTML = bits.filter(Boolean).join(`<span class="sm-dot">·</span>`);
 
   // context fill (#4636): the running request in its parts, else the last one
   renderContext(live, eng, last, on);
-  const cacheBytes = (eng.expert_cache_mib || 0) * 1048576;
-  $("slots-text").textContent = eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(cacheBytes)} GB` : "–";
-  $("slots-bar").style.width = hw.gpu_mem_total ? `${Math.min(100, (100 * cacheBytes) / hw.gpu_mem_total)}%` : "0%";
-  $("ram-text").textContent = hw.ram_total ? `${gb(hw.ram_used)} / ${gb(hw.ram_total, 0)} GB` : "–";
-  const ramPct = hw.ram_total ? (100 * hw.ram_used) / hw.ram_total : 0;
-  $("ram-bar").style.width = `${ramPct}%`;
-  if (ramPct > 92) $("ram-progress").dataset.tone = "danger"; else delete $("ram-progress").dataset.tone;
-  $("temp-text").textContent = hw.gpu_temp == null ? "–" : `${fmt(hw.gpu_temp)} °C`;
-  $("temp-bar").style.width = hw.gpu_temp == null ? "0%" : `${Math.min(100, hw.gpu_temp)}%`;
 
   // recent requests
   const body = $("req-body");

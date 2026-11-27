@@ -132,8 +132,7 @@ process.stdout.write(JSON.stringify([$('sn-sp-power').textContent, $('sn-sp-powe
         self.assertNotIn("data-tip", app)
         self.assertNotIn("#st-tip", css)
         self.assertNotIn('tr("monitor.', app)
-        for text in ["Which model this server runs. Apps ask for it by this exact name.",
-                     "The context window this model runs with, and the engine's version.",
+        for text in ["The context window this model runs with. Apps ask for the model by the name beside it.",
                      "Average answer speed since the server started: answer tokens divided by the time spent writing them. Waiting in the queue and reading the prompt are not counted.",
                      "Average prompt speed since the server started, counting only the tokens that were really read. What came from the cache is left out.",
                      "The average prompt and answer length of one request.",
@@ -144,17 +143,20 @@ process.stdout.write(JSON.stringify([$('sn-sp-power').textContent, $('sn-sp-powe
         for f in (WEB / "locales").glob("*.json"):
             self.assertFalse([k for k in json.loads(f.read_text(encoding="utf-8")) if k.startswith("monitor.")], f.name)
 
-    def test_the_model_card_is_first_and_has_its_elements(self):
+    def test_the_model_line_is_on_the_state_card_and_the_cards_have_their_elements(self):
         app = (WEB / "app.js").read_text(encoding="utf-8")
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<div class="state-model" id="state-model"></div>', html)
         metrics = block(app, "const METRICS = [", "];")
-        self.assertLess(metrics.index('key: "model"'), metrics.index('key: "speed"'))
+        self.assertNotIn('key: "model"', metrics, "the model is a line on the state card now, not a card of its own")
+        self.assertLess(metrics.index('key: "speed"'), metrics.index('key: "gpu"'))
         self.assertNotIn('key: "temp"', metrics, "the temperature is a graph of the power card now")
         self.assertNotIn('key: "pcie"', metrics, "and the PCIe traffic a graph of the load card")
-        for el in ('id="mv-model"', 'id="ms-model"', 'id="model-facts"', 'id="sr-speed"', 'id="sr-prefill"',
-                   'id="sr-power"', 'id="mv-${m.key}-${s.id}"', 'id="sn-${g.id}"', 'class="st-card metric-card" data-key="${m.key}"'):
+        for el in ('id="sr-speed"', 'id="sr-prefill"', 'id="sr-power"', 'id="mv-${m.key}"', 'id="mv-${m.key}-${s.id}"',
+                   'id="sn-${g.id}"', 'class="st-card metric-card" data-key="${m.key}"'):
             self.assertIn(el, app)
         for card in metrics.split("{key: ")[1:]:
-            self.assertTrue("graphs:" in card or "model" in card, card.split(",")[0])
+            self.assertTrue("graphs:" in card, card.split(",")[0])
 
 
 if __name__ == "__main__":

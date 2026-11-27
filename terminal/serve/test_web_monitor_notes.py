@@ -49,18 +49,30 @@ class GpuNote(unittest.TestCase):
         app = (WEB / "app.js").read_text(encoding="utf-8")
         script = (STUBS + function_source(app, "setMetric") + function_source(app, "stat") +
                   function_source(app, "statLine") + function_source(app, "setSide") +
+                  function_source(app, "ramSticks") + function_source(app, "ramSticksTip") +
                   f"function run(hw, st, eng, h) {{\n{gpu_cards_block(app)}\n}}\n"
                   f"run({json.dumps(hw)}, {json.dumps(st)}, {json.dumps(eng or {})}, {json.dumps(h or {})});\n"
                   "console.log(JSON.stringify({gpu: [$('ms-gpu').textContent, $('ms-gpu').title],"
                   " clock: [$('mv-gpu-clock').innerHTML, $('ms-gpu-clock').textContent],"
                   " power: [$('mv-power').innerHTML, $('ms-power').textContent, $('ms-power').title],"
                   " temp: [$('mv-power').innerHTML, $('sn-sp-power-temp').textContent, $('sn-sp-power-temp').title],"
-                  " pcie: [$('sn-sp-gpu-pcie').textContent, $('sn-sp-gpu-pcie').title]}));")
+                  " pcie: [$('sn-sp-gpu-pcie').textContent, $('sn-sp-gpu-pcie').title],"
+                  " ram: [$('mv-ram').innerHTML, $('ms-ram').textContent, $('ms-ram').title, $('sn-sp-ram').textContent]}));")
         return run_node(script)
 
     MAC_HW = {"gpu_util": 95, "gpu_mem_used": 88_000_000_000, "gpu_mem_total": 131_000_000_000, "gpu_temp": None,
               "gpu_power": None, "gpus": [{"index": 0}]}
     MAC_ST = {"gpu_name": "Apple M5 Max", "gpu_note": MAC_NOTE}
+
+    def test_the_memory_card_prints_the_sticks_the_firmware_reports(self):
+        hw = {"ram_used": 33_523_404_800, "ram_total": 68_553_834_496, "ram_sticks": 2, "ram_stick_gib": 32,
+              "ram_type": "DDR4", "ram_mt_s": 2667, "ram_rated_mt_s": 3200, "ram_channels": 2}
+        cards = self.cards(hw, {}, h={"ram_used": [hw["ram_used"], hw["ram_used"] + 500_000_000]})
+        self.assertEqual(cards["ram"][0], "31.2<small>/ 64 GB</small>", "the totals the machine has, not a percentage")
+        self.assertEqual(cards["ram"][1], "2 × 32 GB DDR4-2667 · dual channel")
+        self.assertIn("rated 3200 MT/s, so this machine is not running its memory at the speed they are made for",
+                     cards["ram"][2], "sticks running slower than they are rated is a setting, and the card says so")
+        self.assertEqual(cards["ram"][3], "min 49 · max 50 · avg 49%", "the share of it in use, over the minute of samples")
 
     def test_a_named_mac_gpu_explains_every_empty_reading_of_its_two_cards(self):
         cards = self.cards(self.MAC_HW, self.MAC_ST)

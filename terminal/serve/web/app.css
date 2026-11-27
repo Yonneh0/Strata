@@ -103,12 +103,14 @@ main { flex: 1; min-height: 0; display: flex; }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); grid-auto-rows: 1fr; gap: var(--st-s-4); }
 .metric-card { padding: var(--st-s-4) var(--st-s-5); display: flex; }   /* the card fills its grid cell, so its graphs can be pinned to its bottom */
 .metric-card .st-metric { flex: 1 1 auto; min-width: 0; }
-.model-card__name { font-size: var(--st-fs-md); font-weight: var(--st-fw-bold); line-height: 1.3; overflow-wrap: anywhere; }
-.model-card__facts { display: grid; grid-template-columns: auto 1fr; gap: 3px var(--st-s-3); font-size: var(--st-fs-xs);
-                     align-items: baseline; margin-top: auto; }
-.model-card__facts .mf-k { color: var(--st-ink-muted); }
-.model-card__facts .mf-v { text-align: right; font-variant-numeric: tabular-nums; }
-.model-card__facts .mf-k--wide { grid-column: 1 / -1; }
+/* the model and the run's averages, one line under the state: the name is what the server is, the rest is what it has
+   been doing since it started.  It reads as a sentence, so the pieces are set with dots between them rather than as a
+   two-column table - and a sentence can break anywhere, which a table of eight rows could not do in a wide card. */
+.state-model { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--st-s-3);
+               font-size: var(--st-fs-sm); font-variant-numeric: tabular-nums; }
+.state-model .sm-name { font-weight: var(--st-fw-bold); overflow-wrap: anywhere; }
+.state-model .sm-f i { font-style: normal; color: var(--st-ink-muted); }
+.state-model .sm-dot { color: var(--st-ink-muted); opacity: .55; }
 
 .st-metric__value small { font-size: var(--st-fs-md); font-weight: var(--st-fw-medium); color: var(--st-ink-muted); margin-left: 4px; }
 .st-metric__sub { font-size: var(--st-fs-xs); color: var(--st-ink-muted); font-variant-numeric: tabular-nums; min-height: 1em; }
@@ -127,7 +129,7 @@ main { flex: 1; min-height: 0; display: flex; }
 /* a printed clock is one word - "6000MHz" - and does not break: it keeps its own width and the reading beside it
    gives way, because a number cut in half at the edge of the panel says nothing at all */
 .metric-side { flex: 0 0 auto; white-space: nowrap; text-align: right; }
-.metric-side .st-metric__value { font-size: clamp(16px, 1.5vw, 27px); color: var(--st-warn); }
+.metric-side .st-metric__value { font-size: clamp(16px, 1.5vw, 27px); color: color-mix(in srgb, var(--st-warn) 62%, transparent); }
 .metric-graphs { display: flex; flex-direction: column; gap: var(--st-s-2); margin-top: auto; padding-top: var(--st-s-3); }
 .metric-graph { display: flex; flex-direction: column; gap: 3px; flex: 1 1 0; min-height: 34px; }
 .metric-graph .st-metric__spark { flex: 1 1 auto; min-height: 30px; height: auto; }
@@ -139,14 +141,17 @@ main { flex: 1; min-height: 0; display: flex; }
 .metric-graph__foot .k-good { color: var(--st-accent); }
 .metric-graph__foot .k-read, .metric-graph__foot .k-info { color: var(--st-info); }
 .metric-graph__foot .k-warn { color: var(--st-warn); }
+.metric-graph__foot .k-danger { color: var(--st-danger); }
 /* the two speeds in the page's own state colours, the green of "Generating" and the blue of "Reading", like the two
-   lines they print; a second series over a graph is yellow, the colour of a queued request */
-.metric-card[data-key="speed"] #mv-speed { color: var(--st-accent); }
-.metric-card[data-key="speed"] #mv-prefill { color: var(--st-info); }
+   lines they print - but partly transparent, because a printed number in the line's own saturated hue is louder than
+   the graph it stands for; the unit beside it keeps its own quiet grey */
+.metric-card[data-key="speed"] #mv-speed { color: color-mix(in srgb, var(--st-accent) 62%, transparent); }
+.metric-card[data-key="speed"] #mv-prefill { color: color-mix(in srgb, var(--st-info) 62%, transparent); }
 .st-metric__spark[data-tone="good"] { color: var(--st-accent); }
 .spark-over[data-tone="warn"] { color: var(--st-warn); }
 .spark-over[data-tone="read"] { color: var(--st-info); }
 .st-metric__spark[data-tone="warn"] { color: var(--st-warn); }
+.st-metric__spark[data-tone="danger"] { color: var(--st-danger); }   /* degrees are red, whatever the clock's yellow is */
 .st-metric__spark[data-tone="info"] { color: var(--st-info); }
 .monitor-row { display: grid; grid-template-columns: minmax(min(260px, 100%), 1fr) minmax(0, 2.4fr); gap: var(--st-s-4); }
 .ctx-card { display: flex; flex-direction: column; gap: var(--st-s-2); }
@@ -158,7 +163,9 @@ main { flex: 1; min-height: 0; display: flex; }
 .ctx-seg--answer, .ctx-key--answer { stroke: var(--st-info); background: var(--st-info); }
 .ctx-key--cached { background: var(--st-accent); }
 .ctx-key--free { background: var(--st-surface-2); box-shadow: inset 0 0 0 1px var(--st-line); }
-.ctx-legend { list-style: none; margin: 0 0 var(--st-s-2); padding: 0; display: grid; gap: 2px; font-size: var(--st-fs-sm); }
+/* the legend of the gauge goes to the bottom of its panel: what fills the window is the answer the panel exists to
+   give, and it reads as one block with the card's own edge rather than as a strip under the dial */
+.ctx-legend { list-style: none; margin: auto 0 0; padding: 0; display: grid; gap: 2px; font-size: var(--st-fs-sm); }
 .ctx-legend li { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: var(--st-s-2); font-variant-numeric: tabular-nums; }
 .ctx-legend li.is-now { font-weight: var(--st-fw-bold); }
 .ctx-key { width: 10px; height: 10px; border-radius: 2px; }

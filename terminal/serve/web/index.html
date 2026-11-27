@@ -135,11 +135,14 @@
         </div>
         <div class="state-card__row"><span id="state-label">Waiting for a request</span><span class="muted" id="state-detail"></span></div>
         <div class="st-progress" id="state-progress"><div class="st-progress__bar" id="state-bar" style="width:0%"></div></div>
+        <!-- the model, its context and the run's averages, in one line: filled by app.js -->
+        <div class="state-model" id="state-model"></div>
       </div>
 
       <div class="metrics" id="metrics">
         <!-- filled by app.js: Speed, GPU load (with its SM clock and the PCIe link it reads over), VRAM (with its memory
-             clock), GPU Power (with the temperature), CPU (with its temperature) and Disk read -->
+             clock), Memory (what the sticks are, and the share in use), GPU Power (with the temperature), CPU (with its
+             temperature) and Disk read -->
       </div>
 
       <div class="monitor-row">
@@ -166,12 +169,6 @@
             <li id="ctx-row-free" title="Room left in this model&rsquo;s context window."><span class="ctx-key ctx-key--free"></span><span>Free</span><span class="muted" id="ctx-leg-free">&ndash;</span></li>
           </ul>
           <p class="small muted ctx-note" id="ctx-note" hidden>Waiting in the queue</p>
-          <div class="bar-row"><span>Experts in VRAM</span><span class="muted" id="slots-text">&ndash;</span></div>
-          <div class="st-progress"><div class="st-progress__bar" id="slots-bar" style="width:0%"></div></div>
-          <div class="bar-row"><span>System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
-          <div class="st-progress" id="ram-progress"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div></div>
-          <div class="bar-row"><span>GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
-          <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div></div>
         </div>
         <div class="st-card req-card">
           <div class="req-head"><span class="card-title">Recent requests</span>

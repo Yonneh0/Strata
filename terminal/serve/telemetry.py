@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import collections
 import ctypes
+import json
 import os
 from strata_control import sysinfo
 import re
@@ -1877,6 +1878,41 @@ class CpuTemp:
         return self.value
 
 
+def memory_facts(run=subprocess.run):
+    """What the memory sticks themselves say, from the machine's firmware: how many, how big, which kind, and how fast
+    the machine is running them.  A configured rate under the rated one is memory not running at the speed the sticks
+    are made for, which is the kind of thing a machine is quietly like and worth putting beside the share of it in
+    use.  WMI answers in a second or two, so this is asked once, and by the sampler's own thread.  (Select-Object, not
+    -Property: what -Property selects still serializes as the CIM object's own metadata, with no Capacity in it at all.)"""
+    try:
+        ps = run(["powershell", "-NoProfile", "-Command",
+                  "Get-CimInstance Win32_PhysicalMemory | Select-Object Capacity,ConfiguredClockSpeed,Speed,"
+                  "DeviceLocator,SMBIOSMemoryType | ConvertTo-Json -Compress"],
+                 capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL,
+                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        rows = json.loads((ps.stdout or "").strip() or "null")
+    except Exception:                                        # noqa: BLE001 - a monitor outlives its source
+        return {}
+    rows = [rows] if isinstance(rows, dict) else rows
+    rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("Capacity")]
+    if not rows:
+        return {}
+    cfg = [r["ConfiguredClockSpeed"] for r in rows if r.get("ConfiguredClockSpeed")]
+    rated = [r["Speed"] for r in rows if r.get("Speed")]
+    # "ChannelA-DIMM0", "ChannelB-DIMM0": what comes before the slot names the channel, so two different ones is two
+    # channels.  A firmware that says only "DIMM 1" has said nothing about channels, and gets none claimed.
+    chan = {str(r.get("DeviceLocator") or "").split("DIMM")[0].strip(" -_") for r in rows}
+    chan.discard("")
+    facts = {"ram_sticks": len(rows),
+             "ram_stick_gib": round(max(r["Capacity"] for r in rows) / 2**30),
+             "ram_type": {18: "DDR2", 20: "DDR", 24: "DDR3", 26: "DDR4", 34: "DDR5"}.get(rows[0].get("SMBIOSMemoryType")),
+             "ram_mt_s": max(cfg) if cfg else None,
+             "ram_rated_mt_s": max(rated) if rated else None}
+    if chan:
+        facts["ram_channels"] = len(chan)
+    return facts
+
+
 class Telemetry:
     def __init__(self, extra=None, gpu_index=0, gpu_indices=None, amd=False):
         """`extra()` -> dict of more series to record each second (the server's tok/s).  `gpu_index`: the card the
@@ -1931,6 +1967,7 @@ class Telemetry:
         }
         self._disk_prev = None
         self.cpu_temp = CpuTemp()
+        self.mem_facts = None            # the sticks themselves, for the Memory card's line
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -1995,6 +2032,9 @@ class Telemetry:
         else:
             s["cpu"] = self.fallback.cpu()
             s["ram_used"], s["ram_total"] = self.fallback.ram()
+        if self.mem_facts is None:                          # once: a machine's memory does not change while it runs
+            self.mem_facts = memory_facts() if os.name == "nt" else {}
+        s.update(self.mem_facts)
         s["disk_read_mb"], s["disk_write_mb"] = self._disk()
         s["cpu_temp"] = self.cpu_temp.read()
         s["cpu_temp_src"] = self.cpu_temp.src
