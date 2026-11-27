@@ -74,6 +74,16 @@ class GpuNote(unittest.TestCase):
                      cards["ram"][2], "sticks running slower than they are rated is a setting, and the card says so")
         self.assertEqual(cards["ram"][3], "min 49 · max 50 · avg 49%", "the share of it in use, over the minute of samples")
 
+    def test_the_memory_card_says_why_when_the_firmware_keeps_its_sticks_from_us(self):
+        # Linux hands the firmware's stick details only to root, and a Windows whose WMI did not answer is in the same
+        # position: the line says so, because a blank under a card is a thing the operator has to guess about
+        hw = {"ram_used": 27_000_000_000, "ram_total": 32_891_662_336,
+              "ram_note": "What the sticks themselves are is read from the machine's firmware, and this operating "
+                          "system hands that out only to root."}
+        cards = self.cards(hw, {}, h={"ram_used": [hw["ram_used"]]})
+        self.assertIn("read from the machine's firmware", cards["ram"][1])
+        self.assertEqual(cards["ram"][3], "min 82 · max 82 · avg 82%")
+
     def test_a_named_mac_gpu_explains_every_empty_reading_of_its_two_cards(self):
         cards = self.cards(self.MAC_HW, self.MAC_ST)
         self.assertEqual(cards["power"][1:], ["not available", MAC_NOTE])
