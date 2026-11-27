@@ -160,32 +160,51 @@ async function loadHealth() {
 // ------------------------------------------------------------------ Monitor
 const METRICS = [
   {key: "model", label: "Model", icon: "info", unit: ""},
-  {key: "speed", label: "Speed", icon: "gauge", unit: "t/s", series: "tok_s"},
-  // #5484: what the load is (NVML, amdgpu and the Mac report time busy, not compute in use)
+  // the two speeds in the page's own state colours: writing the answer is the green of "Generating", reading the
+  // prompt the blue of "Reading"; the line under them is the PCIe link the speed is bound by
+  {key: "speed", label: "Speed", icon: "gauge", unit: "t/s", series: "tok_s",
+   graphs: [{id: "sp-speed", over: "sp-prefill", overTone: "read", tone: "good", cap: [["Generating", "good"], ["Reading", "read"]]}]},
+  // #5484: what the load is (NVML, amdgpu and the Mac report time busy, not compute in use). Its PCIe graph is the
+  // card this used to be its own: the load and the link the experts cross belong side by side.
   {key: "gpu", label: "GPU load", icon: "gpu", unit: "%", series: "gpu_util", max: 100,
-   hint: "Share of the time the GPU had work to do. It does not say how much of its compute is in use."},
-  {key: "vram", label: "VRAM", icon: "layers", unit: "GB", series: "gpu_mem_used"},
-  {key: "temp", label: "GPU temp", icon: "thermometer", unit: "°C", series: "gpu_temp", tone: "warn"},
-  {key: "power", label: "Power", icon: "bolt", unit: "W", series: "gpu_power"},
-  {key: "pcie", label: "PCIe", icon: "link", unit: "", series: "gpu_pcie_rx_mb", tone: "info"},
-  {key: "cpu", label: "CPU", icon: "cpu", unit: "%", series: "cpu", max: 100},
-  {key: "disk", label: "Disk read", icon: "disk", unit: "MB/s", series: "disk_read_mb", tone: "info"},
+   hint: "Share of the time the GPU had work to do. It does not say how much of its compute is in use.",
+   sides: [{id: "clock", label: "SM clock"}],
+   graphs: [{id: "sp-gpu", over: "sp-gpu-clock", overTone: "warn", cap: [["Busy", ""], ["SM clock", "warn"]]},
+            {id: "sp-gpu-pcie", tone: "info", cap: [["PCIe", "info"]]}]},
+  {key: "vram", label: "VRAM", icon: "layers", unit: "GB", series: "gpu_mem_used",
+   sides: [{id: "clock", label: "Memory clock"}],
+   graphs: [{id: "sp-vram", over: "sp-vram-clock", overTone: "warn", cap: [["In use", ""], ["Memory clock", "warn"]]}]},
+  // the temperature that had a card of its own lives here now, under the power that makes it
+  {key: "power", label: "GPU Power", icon: "bolt", unit: "W", series: "gpu_power",
+   graphs: [{id: "sp-power", cap: [["Power", ""]]}, {id: "sp-power-temp", tone: "warn", cap: [["Temperature", "warn"]], now: true}]},
+  {key: "cpu", label: "CPU", icon: "cpu", unit: "%", series: "cpu", max: 100,
+   graphs: [{id: "sp-cpu", cap: [["Busy", ""]]}, {id: "sp-cpu-temp", tone: "warn", cap: [["Temperature", "warn"]], now: true}]},
+  {key: "disk", label: "Disk read", icon: "disk", unit: "MB/s", series: "disk_read_mb", tone: "info",
+   graphs: [{id: "sp-disk", tone: "info", cap: [["Read", "info"]]}]},
 ];
 $("metrics").innerHTML = METRICS.map((m) => `
-  <div class="st-card metric-card${m.key === "model" ? " model-card" : ""}"><div class="st-metric">
+  <div class="st-card metric-card" data-key="${m.key}"><div class="st-metric">
     <span class="st-metric__label" id="ml-${m.key}"${m.hint ? ` title="${esc(m.hint)}"` : ""}>${icon(m.icon, "st-icon st-icon--sm")}${esc(m.label)}</span>
-    ${m.key === "speed" ? `<div class="speed-values">
+    ${m.key === "model" ? `<span class="st-metric__value model-card__name" id="mv-model">–</span>
+    <span class="st-metric__sub" id="ms-model"></span><div class="model-card__facts" id="model-facts"></div>`
+    : m.key === "speed" ? `<div class="metric-values speed-values">
       <div><span class="st-metric__value" id="mv-speed">-</span><span class="st-metric__sub" id="ms-speed">Decode</span><span class="st-metric__sub speed-range" id="sr-speed"></span></div>
       <div class="speed-prefill"><span class="st-metric__value" id="mv-prefill">-</span><span class="st-metric__sub" id="ms-prefill">Prefill</span><span class="st-metric__sub speed-range" id="sr-prefill"></span></div>
-    </div>` : m.key === "model" ? `<span class="st-metric__value model-card__name" id="mv-model">–</span>
-    <span class="st-metric__sub" id="ms-model"></span>` : `<span class="st-metric__value" id="mv-${m.key}">–</span>
-    <span class="st-metric__sub" id="ms-${m.key}"></span>${m.key === "temp" || m.key === "power" ? `<span class="st-metric__sub speed-range" id="sr-${m.key}"></span>` : ""}`}
-    ${m.key === "model" ? `<div class="model-card__facts" id="model-facts"></div>` : `<svg class="st-metric__spark" id="sp-${m.key}" viewBox="0 0 100 32" preserveAspectRatio="none"${m.tone ? ` data-tone="${m.tone}"` : ""}>
+    </div>`
+    : `<div class="metric-values"><div><span class="st-metric__value" id="mv-${m.key}">–</span>
+      <span class="st-metric__sub" id="ms-${m.key}"></span>${m.key === "power" ? `<span class="st-metric__sub speed-range" id="sr-power"></span>` : ""}</div>
+      ${(m.sides || []).map((s) => `<div class="metric-side"><span class="st-metric__value" id="mv-${m.key}-${s.id}">–</span>
+      <span class="st-metric__sub" id="ms-${m.key}-${s.id}">${esc(s.label)}</span></div>`).join("")}</div>`}
+    ${(m.graphs || []).length ? `<div class="metric-graphs">${m.graphs.map((g) => `
+    <div class="metric-graph"><svg class="st-metric__spark" id="${g.id}" viewBox="0 0 100 32" preserveAspectRatio="none"${g.tone ? ` data-tone="${g.tone}"` : ""}>
       <path class="area" fill="currentColor" opacity=".12"/><path class="line" fill="none" stroke="currentColor"
-      stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-      ${m.key === "speed" ? `<g id="sp-prefill" class="speed-prefill"><path class="area" fill="currentColor" opacity=".12"/>
+      stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>${g.over ? `
+      <g class="spark-over" id="${g.over}"${g.overTone ? ` data-tone="${g.overTone}"` : ""}><path class="area" fill="currentColor" opacity=".12"/>
       <path class="line" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"
-      stroke-linecap="round" vector-effect="non-scaling-stroke"/></g>` : ""}</svg>`}</div></div>`).join("");
+      stroke-linecap="round" vector-effect="non-scaling-stroke"/></g>` : ""}</svg>
+      <div class="metric-graph__foot"><span>${g.cap.map((c) => (c[1] ? `<i class="k-${c[1]}">${esc(c[0])}</i>` : esc(c[0]))).join(" · ")}</span><span id="sn-${g.id}"></span></div>
+    </div>`).join("")}</div>` : ""}
+  </div></div>`).join("");
 
 function spark(id, values, max) {
   const svg = $(id);
@@ -462,42 +481,33 @@ function pcieLink(hw) {
   return { gen: hw.gpu_pcie_gen_max || hw.gpu_pcie_gen || null, cur: hw.gpu_pcie_gen || null, width: hw.gpu_pcie_width || null, card: null };
 }
 
-// The Speed card's min and max (#4968, from PR #4968 by noahark): the slowest and the fastest of the newest SPEED_KEPT requests, the same
-// window the server keeps (GET /metrics?requests=all, newest last in its deque of 500). The page adds every polled request to its own
-// map and drops the oldest past SPEED_KEPT, so an extreme the server has let go of is gone here too. A new totals window (a server
-// restart) starts the map afresh from one full pull.
-const SPEED_KEPT = 500;
-let speedWin = new Map(), speedWinSince = null;
-function keepNewest(map, cap) {
-  if (map.size <= cap) return map;
-  const rows = [...map.values()].sort((a, b) => (a.time || 0) - (b.time || 0));
-  return new Map(rows.slice(-cap).map((r) => [r.id, r]));
+/* What a graph's line of numbers says, from the samples the graph itself is drawn from: the server keeps the last
+   minute of each series (one sample each second), so the shape and its numbers are one reading and not two. A page
+   opened later says less, never something different - and nothing here is kept by the page between polls. */
+function stat(values) {
+  const v = (values || []).filter((x) => x != null && Number.isFinite(x));
+  if (!v.length) return null;
+  return {now: v[v.length - 1], min: Math.min(...v), max: Math.max(...v), avg: v.reduce((a, b) => a + b, 0) / v.length, n: v.length};
 }
-const prefillOf = (r) => (r.prompt_ms > 0 && r.prompt_tokens != null && r.prompt_tokens - (r.reused || 0) > 0
-                          ? (r.prompt_tokens - (r.reused || 0)) / (r.prompt_ms / 1000) : null);
-function speedRange(rows) {
-  const out = {};
-  for (const [key, get] of [["decode", (r) => r.decode_tok_s], ["prefill", prefillOf]]) {
-    const v = rows.map(get).filter((x) => x != null && x > 0);
-    out[key] = v.length ? {min: Math.min(...v), max: Math.max(...v), n: v.length} : null;
-  }
-  return out;
+function statLine(id, values, d, unit, o) {
+  const el = $(`sn-${id}`);
+  if (!el) return;
+  const op = o || {}, r = stat(values);
+  if (!r) { el.textContent = op.none || ""; el.title = op.noneTitle || ""; return; }
+  const div = op.div || 1, f = (x) => fmt(x / div, d);
+  el.textContent = [op.head, op.brief ? `${f(r.now)}${unit}`
+                     : `${op.now ? `${f(r.now)}${unit} · ` : ""}min ${f(r.min)} · max ${f(r.max)} · avg ${f(r.avg)}${unit}`]
+                   .filter((x) => x).join(" · ");
+  el.title = `${op.tip ? `${op.tip} ` : ""}The last ${r.n} seconds the server keeps (a sample each second) - the same window the graph above is drawn from.`;
 }
-async function pullSpeedWindow() {
-  try {
-    const r = await fetch("metrics?requests=all", {headers: headers()});
-    if (r.ok) for (const q of ((await r.json()).requests || [])) if (q.id != null) speedWin.set(q.id, q);
-    speedWin = keepNewest(speedWin, SPEED_KEPT);
-    fillSpeedRange();
-  } catch { /* the window stays as it is; the next polls add to it */ }
-}
-function fillSpeedRange() {
-  const range = speedRange([...speedWin.values()]);
-  for (const [id, key, d] of [["sr-speed", "decode", 1], ["sr-prefill", "prefill", 0]]) {
-    const r = range[key], el = $(id);
-    el.textContent = r ? `min ${fmt(r.min, d)} · max ${fmt(r.max, d)}` : "";
-    el.title = r ? `The slowest and the fastest of the last ${fmt(r.n)} requests. The server keeps up to 500.` : "";
-  }
+/* A second printed number beside a card's big one: the SM clock over the load, the memory clock over the VRAM. */
+function setSide(card, id, value, unit, sub, why) {
+  const v = $(`mv-${card}-${id}`);
+  if (!v) return;
+  v.innerHTML = value == null ? "–" : `${esc(value)}${unit ? `<small>${esc(unit)}</small>` : ""}`;
+  const s = $(`ms-${card}-${id}`);
+  s.textContent = sub || "";
+  s.title = why || "";
 }
 // Power and temperature averages (#4968): a sample is taken at each poll while the server is working (queued, reading or generating;
 // idle time is left out) and weighs the seconds since the poll before it, at most HW_GAP_S, so a page that polled less often (a
@@ -519,8 +529,11 @@ function hwSample(win, last, now, hw, working) {
   const w = last == null ? 1 : Math.min(Math.max(now - last, 0), HW_GAP_S);
   if (!working || !w) return win;
   const g = [...(hw.gpus || [])].sort((a, b) => (a.index || 0) - (b.index || 0));
-  if (!g.length && hw.gpu_power == null) return win;
-  win.push({w, t: g.map((x) => x.temp), p: hw.gpu_power, names: g.map((x) => x.name)});
+  if (!g.length && hw.gpu_power == null && hw.gpu_temp == null) return win;
+  // one card in the machine (the usual case) has no per-card rows at all, only the top-level reading - without this
+  // the average temperature was a figure no server of one GPU ever got to show
+  const cards = g.length ? g : [{index: 0, temp: hw.gpu_temp, name: "the GPU"}];
+  win.push({w, t: cards.map((x) => x.temp), p: hw.gpu_power, names: cards.map((x) => x.name)});
   return win.length > 21600 ? win.slice(-18000) : win;
 }
 const spanText = (s) => (s < 90 ? `${fmt(s)} s` : s < 5400 ? `${fmt(s / 60)} min` : `${fmt(s / 3600, 1)} h`);
@@ -535,13 +548,16 @@ function sampleHw(hw, working, key) {
     pe.textContent = avg.power != null ? `avg ${fmt(avg.power)} W` : "";
     pe.title = avg.power != null ? `Average power while the server was working, over the ${span} this page has watched. Idle time is left out.` : "";
   }
-  const te = $("sr-temp");
-  if (te) {
+  const tf = $("sn-sp-power-temp");
+  if (tf) {
     const any = avg.temps.some((x) => x != null);
-    te.textContent = any ? `avg ${avg.temps.map((x) => (x == null ? "–" : fmt(x))).join(" / ")}` : "";
     const names = hwWin.length ? hwWin[hwWin.length - 1].names : [];
     const detail = avg.temps.map((x, i) => (x == null || !names[i] ? null : `${names[i]}: ${fmt(x)} °C`)).filter(Boolean).join(" · ");
-    te.title = any ? `${detail ? detail + "\n" : ""}Average temperature of each card while the server was working, over the ${span} this page has watched. Idle time is left out.` : "";
+    // the card's own line is the last minute (the graph's window); this longer one, the mean of the time this page has
+    // watched the server working, goes underneath it in the tooltip rather than beside it - two means of the same
+    // quantity, one over a minute and one over an hour, do not belong on one line
+    if (any) tf.title = `${detail ? detail + "\n" : ""}Average temperature of each card while the server was working, over the ${span} this page has watched. Idle time is left out.` +
+                        (tf.title ? `\n${tf.title}` : "");
   }
 }
 
@@ -637,7 +653,7 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   $("state-detail").textContent = detail;
   $("state-bar").style.width = `${pct}%`;
 
-  // the eight cards
+  // the cards
   // Idle: not the last request's speed (one request is noisy) but the run's average from the server's totals
   // (token-weighted, the same figure the engine's DONE lines and Prometheus report). Live stays live.
   const avgDecode = totals && totals.decode_ms > 0 && totals.output_tokens > 0 ? totals.output_tokens / (totals.decode_ms / 1000) : null;
@@ -652,57 +668,89 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
             live.state === "reading" ? "Prefill now" : live.state === "generating" ? "Prefill this request" : avgPrefill != null ? "Prefill · run average" : last ? "Prefill last request" : "Prefill");
   spark("sp-speed", h.tok_s);
   spark("sp-prefill", h.prefill_tok_s_mean);
-  if (speedWinSince !== (totals && totals.since)) { speedWin = new Map(); speedWinSince = totals && totals.since; pullSpeedWindow(); }
-  for (const r of requests) if (r.id != null) speedWin.set(r.id, r);
-  speedWin = keepNewest(speedWin, SPEED_KEPT);
-  fillSpeedRange();
+  // the min and max under the two speeds, from the minute of samples the two lines are drawn from: they move with the
+  // graph. They used to come from the finished requests, so a fast stretch inside one request was invisible to them
+  // and nothing at all moved between two requests - the card looked frozen while the line above it jumped.
+  for (const [id, values, d, what] of [["sr-speed", h.tok_s, 1, "answering"], ["sr-prefill", h.prefill_tok_s_mean, 0, "reading"]]) {
+    const r = stat(values), el = $(id);
+    el.textContent = r && r.max > 0 ? `min ${fmt(r.min, d)} · max ${fmt(r.max, d)}` : "";
+    el.title = r && r.max > 0 ? `The slowest and the fastest second of the last ${r.n} the server keeps (a sample each second) - the same window the graph above is drawn from, while it is ${what}.` : "";
+  }
   // a model split across several cards (issue #112): the cards show their total / mean / hottest, and each card's own
   const per = (f) => (hw.gpus || []).map((g) => `GPU ${g.index} ${f(g)}`).join(" · ");
   const multi = (hw.gpus || []).length > 1;
+  // #5457: a card the server cannot read (a Mac has no temperature or power without root and no PCIe link; a Windows AMD card)
+  // says so, with the server's own reason, whether or not the GPU has a name
+  const unread = (v) => v == null && !multi && !!st.gpu_note;
   setMetric("gpu", hw.gpu_util == null ? null : fmt(hw.gpu_util), "%",
             multi ? per((g) => (g.util == null ? "–" : `${fmt(g.util)}%`)) : st.gpu_name || (st.gpu_note ? "not available" : ""));
   spark("sp-gpu", h.gpu_util, 100);
+  statLine("sp-gpu", h.gpu_util, 0, "%");
+  // the clock the SMs run at, printed beside the load and drawn over its graph in the yellow of a queued request: a
+  // card leaning on its power limit says so here first, because the load stays at 100 % while the clock gives way
+  setSide("gpu", "clock", hw.gpu_clock_mhz, "MHz", hw.gpu_clock_max_mhz ? `of ${fmt(hw.gpu_clock_max_mhz)}`
+        : unread(hw.gpu_clock_mhz) ? "not available" : "", unread(hw.gpu_clock_mhz) ? st.gpu_note
+        : `The fastest this card says it can run is ${fmt(hw.gpu_clock_max_mhz || 0)} MHz. The yellow line over the load graph is the same series.`);
+  spark("sp-gpu-clock", h.gpu_clock_mhz, hw.gpu_clock_max_mhz);
   setMetric("vram", hw.gpu_mem_used == null ? null : gb(hw.gpu_mem_used), hw.gpu_mem_total ? `/ ${gb(hw.gpu_mem_total, 0)} GB` : "GB",
             multi ? per((g) => (g.mem_used == null ? "–" : `${gb(g.mem_used)} GB`))
                   : eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached` : (st.gpu_note ? "not available on Windows AMD yet" : ""));
   spark("sp-vram", h.gpu_mem_used, hw.gpu_mem_total);
-  // #5457: a card the server cannot read (a Mac has no temperature or power without root and no PCIe link; a Windows AMD card)
-  // says so, with the server's own reason, whether or not the GPU has a name
-  const unread = (v) => v == null && !multi && !!st.gpu_note;
-  setMetric("temp", hw.gpu_temp == null ? null : fmt(hw.gpu_temp), "°C",
-            multi ? per((g) => (g.temp == null ? "–" : `${fmt(g.temp)}°`)) : unread(hw.gpu_temp) ? "not available" : "",
-            unread(hw.gpu_temp) ? st.gpu_note : "");
-  spark("sp-temp", h.gpu_temp, 90);
+  statLine("sp-vram", h.gpu_mem_used, 1, " GB", {div: 1073741824});
+  setSide("vram", "clock", hw.gpu_mem_clock_mhz, "MHz", hw.gpu_mem_clock_max_mhz ? `of ${fmt(hw.gpu_mem_clock_max_mhz)}`
+        : unread(hw.gpu_mem_clock_mhz) ? "not available" : "", unread(hw.gpu_mem_clock_mhz) ? st.gpu_note
+        : `The fastest this card's memory runs is ${fmt(hw.gpu_mem_clock_max_mhz || 0)} MHz. The yellow line over the VRAM graph is the same series.`);
+  spark("sp-vram-clock", h.gpu_mem_clock_mhz, hw.gpu_mem_clock_max_mhz);
+  // the power card, and the temperature that had a card of its own under it: the watts in and the degrees out are one
+  // story, and on eight gigabytes they turn on the same thing
   setMetric("power", hw.gpu_power == null ? null : fmt(hw.gpu_power), "W",
             multi ? per((g) => (g.power == null ? "–" : `${fmt(g.power)} W` +
                                              (g.power_limit ? ` of ${fmt(g.power_limit)} W limit` : "")))
                   : hw.gpu_power_limit ? `of ${fmt(hw.gpu_power_limit)} W limit` : unread(hw.gpu_power) ? "not available" : "",
             unread(hw.gpu_power) ? st.gpu_note : "");
   spark("sp-power", h.gpu_power, hw.gpu_power_limit);
-  // each card trains its own link: with several cards the big number is the weakest card's and the line under it
-  // names every card, because one card's "Gen5 x8" said nothing about a second card trained down to x4
-  // (the per-card words follow the big number's rule: the link the card trained, not the lower one it idles at)
-  // a card that runs narrower than it could - capped to x8 in a x16 slot, or trained down by the board - says both,
-  // because the narrow number alone reads as a link someone chose
+  statLine("sp-power", h.gpu_power, 0, " W");
+  spark("sp-power-temp", h.gpu_temp, 90);
+  statLine("sp-power-temp", h.gpu_temp, 0, "°C",
+           {now: true, none: unread(hw.gpu_temp) ? "not available" : "", noneTitle: unread(hw.gpu_temp) ? st.gpu_note : ""});
+  // the PCIe traffic, kept where the load is rather than in a card of its own: the link the experts cross and the busy
+  // time they cross it are read together. Each graph trains its own link: with several cards the words follow the
+  // weakest one (gpu_pcie_bottleneck), because one card's "Gen5 x8" said nothing about a second card trained down to
+  // x4. A card that runs narrower than it could - capped to x8 in a x16 slot, or trained down by the board - says
+  // both, because the narrow number alone reads as a link someone chose
   const link = (g) => { const v = g.pcie_gen_max || g.pcie_gen;
                         return v ? `Gen${v}${g.pcie_width ? ` x${g.pcie_width}` +
                                (g.pcie_width_max > g.pcie_width ? ` of x${g.pcie_width_max}` : "") : ""}` : "–"; };
-  // the big number with several cards: the one card whose link carries the least (gpu_pcie_bottleneck); the top-level fields are card 0's
   const slow = multi && hw.gpu_pcie_bottleneck ? hw.gpu_pcie_bottleneck : null;
   const one = slow ? { gen: slow.gen, gen_max: slow.gen_max, width: slow.width, width_max: slow.width_max }
                    : { gen: hw.gpu_pcie_gen, gen_max: hw.gpu_pcie_gen_max, width: hw.gpu_pcie_width, width_max: hw.gpu_pcie_width_max };
   const gen = one.gen_max || one.gen;
   const width = one.width ? `x${one.width}` + (one.width_max > one.width ? ` of x${one.width_max}` : "") : "";
-  const rx = hw.gpu_pcie_rx_mb == null ? ""
-           : `${fmt(hw.gpu_pcie_rx_mb, hw.gpu_pcie_rx_mb < 10 ? 1 : 0)} MB/s`;
-  setMetric("pcie", gen ? `Gen${gen}` : null, width,
-            multi ? `${per(link)}${rx ? ` · ${rx} total` : ""}`
-                  : rx === "" ? (unread(gen || null) ? "not available" : "") : `to GPU ${rx}` +
-                  (hw.gpu_pcie_gen && gen && hw.gpu_pcie_gen < gen ? ` · idle Gen${hw.gpu_pcie_gen}` : ""),
-            unread(gen || null) ? st.gpu_note : "");
-  spark("sp-pcie", h.gpu_pcie_rx_mb);
+  const rxWin = stat(h.gpu_pcie_rx_mb), bigPcie = (rxWin ? rxWin.max : 0) >= 1000;
+  const pcieWords = multi ? per(link)
+                          : gen ? `Gen${gen}${width ? ` ${width}` : ""}` +
+                            (hw.gpu_pcie_gen && gen && hw.gpu_pcie_gen < gen ? ` (idle Gen${hw.gpu_pcie_gen})` : "") : "";
+  const pcieOpt = {div: bigPcie ? 1024 : 1, head: pcieWords,
+                   tip: `${hw.gpu_pcie_tx_mb == null ? "" : `The card sends ${fmt(hw.gpu_pcie_tx_mb, 1)} MB/s the other way right now. `}` +
+                        (multi ? "Traffic every card reads." : "Traffic the GPU reads over its link.") +
+                        (st.gpu_note ? ` ${st.gpu_note}` : ""),
+                   none: unread(hw.gpu_pcie_rx_mb) ? "not available" : "", noneTitle: st.gpu_note || ""};
+  spark("sp-gpu-pcie", h.gpu_pcie_rx_mb);
+  statLine("sp-gpu-pcie", h.gpu_pcie_rx_mb, bigPcie ? 1 : 0, bigPcie ? " GB/s" : " MB/s", Object.assign({now: true}, pcieOpt));
   setMetric("cpu", hw.cpu == null ? null : fmt(hw.cpu), "%", st.threads ? `${st.cores ? `${st.cores} cores · ` : ""}${st.threads} threads` : "");
   spark("sp-cpu", h.cpu, 100);
+  statLine("sp-cpu", h.cpu, 0, "%");
+  // the processor's own degrees, when this machine's sensors give them: on Linux that is the kernel's hwmon chip, and
+  // a Windows that keeps the number to its embedded controller says so rather than showing a number nobody read
+  // the processor's own degrees, when the machine gives them: Linux from the kernel's hwmon chip, Windows 11 24H2 from
+  // its ACPI thermal zone - a zone that follows the processor, but the zone's sensor and not the die, and its tooltip
+  // says which of the two the number came from
+  spark("sp-cpu-temp", h.cpu_temp);
+  const cpuSensor = hw.cpu_temp_src === "hwmon" ? "From the kernel's processor temperature chip. "
+                : hw.cpu_temp_src ? "From this machine's ACPI thermal zone: it follows the processor, but it is the zone's own sensor, not the die. " : "";
+  statLine("sp-cpu-temp", h.cpu_temp, 0, "°C",
+           {now: true, tip: cpuSensor, none: "no sensor here",
+            noneTitle: "This machine's sensors do not give a processor temperature. Linux reads it from the kernel's hwmon chips (coretemp, k10temp, zenpower); a Windows whose thermal zone answers nothing has none to show."});
   if (hw.disk_read_mb == null) {
     setMetric("disk", null, "", st.psutil ? "" : "needs psutil (setup installs it)");
   } else {
@@ -711,6 +759,9 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
               hw.disk_write_mb == null ? "" : `write ${fmt(hw.disk_write_mb, 1)} MB/s`);
   }
   spark("sp-disk", h.disk_read_mb);
+  const diskWin = stat(h.disk_read_mb), bigDisk = (diskWin ? diskWin.max : 0) >= 1000;
+  statLine("sp-disk", h.disk_read_mb, bigDisk ? 1 : 0, bigDisk ? " GB/s" : " MB/s",
+           {div: bigDisk ? 1024 : 1, tip: "What this machine reads from its disks - the experts that are not in VRAM come from here."});
   // power and temperature averages (#4968); after the cards block above so that block stays self-contained
   sampleHw(hw, !!live.state && live.state !== "idle" && live.state !== "unloaded", `${totals && totals.since}|${eng.model || ""}`);
 

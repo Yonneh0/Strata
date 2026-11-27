@@ -28,6 +28,8 @@ HISTORY = 60
 # A GP100 (Pascal) reports PCIe traffic of just under 200 GiB/s now and then, even idle: 2^22 KB in NVML's 20 ms window,
 # which reads like the counter stepping back and wrapping.  No link carries it (PCIe 6.0 x16 is under 120 GiB/s).
 PCIE_KB_S_MAX = 150 << 20
+# NVML's clock ids (nvmlClockType_t): what the card runs at now, and the fastest it says it can reach.
+NVML_CLOCK_GRAPHICS, NVML_CLOCK_SM, NVML_CLOCK_MEM = 1, 3, 2
 
 
 # ------------------------------------------------------------------------------------------------ NVML
@@ -103,6 +105,12 @@ class _Nvml:
         out["power"] = mw / 1000.0 if mw is not None else None
         lim = self._uint("nvmlDeviceGetEnforcedPowerLimit")
         out["power_limit"] = lim / 1000.0 if lim is not None else None
+        # the clocks the card runs at now and the fastest it claims (MHz): the SM/graphics clock is what decode runs at,
+        # the memory clock what the VRAM does with it.  A driver that will not say gives None, like every other reading here.
+        out["clock_mhz"] = self._uint("nvmlDeviceGetClockInfo", ctypes.c_uint(NVML_CLOCK_GRAPHICS))
+        out["mem_clock_mhz"] = self._uint("nvmlDeviceGetClockInfo", ctypes.c_uint(NVML_CLOCK_MEM))
+        out["clock_max_mhz"] = self._uint("nvmlDeviceGetMaxClockInfo", ctypes.c_uint(NVML_CLOCK_GRAPHICS))
+        out["mem_clock_max_mhz"] = self._uint("nvmlDeviceGetMaxClockInfo", ctypes.c_uint(NVML_CLOCK_MEM))
         out["pcie_gen"] = self._uint("nvmlDeviceGetCurrPcieLinkGeneration")        # drops at idle (power saving)
         out["pcie_gen_max"] = self._uint("nvmlDeviceGetMaxPcieLinkGeneration")
         out["pcie_width"] = self._uint("nvmlDeviceGetCurrPcieLinkWidth")
@@ -1701,6 +1709,174 @@ def pcie_bottleneck(reads) -> dict | None:
             "width_max": r.get("pcie_width_max")}
 
 
+# ------------------------------------------------------------------ processor temperature
+# The Monitor's CPU card wants the processor's own temperature.  Linux: the kernel's hwmon chips (coretemp, k10temp,
+# zenpower, cpu_thermal) - a file read, so it is asked every few seconds.  Windows: the ACPI thermal zones that
+# Windows 11 24H2 publishes as performance counters, read through pdh.dll each second; the WMI class beside them is the
+# fallback and both answer the same number (measured on the MSI: 51.1 °C idle, 96.9 °C with twelve threads at 100 %,
+# the GPU's own 43 °C at the same moment - the two are told apart).  Nothing is invented here, the same rule as the
+# app's host sensors (#3628).
+CPU_TEMP_SENSORS = ("coretemp", "k10temp", "zenpower", "cpu_thermal", "cpu-thermal")
+WIN_TEMP_PS = ("$t=(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature "
+               "-ErrorAction SilentlyContinue | Select-Object -First 1).CurrentTemperature; if($t){$t}")
+
+
+def plausible_c(v):
+    return v is not None and 0 < v < 150
+
+
+def linux_cpu_temp(basedir="/sys/class/hwmon"):
+    """The hottest reading of the processor's hwmon chips (°C), or None where there is no such chip."""
+    best = None
+    try:
+        folders = os.listdir(basedir)
+    except OSError:
+        return None
+    for folder in folders:
+        try:
+            with open(os.path.join(basedir, folder, "name"), encoding="utf-8") as f:
+                if f.read().strip() not in CPU_TEMP_SENSORS:
+                    continue
+            for fn in os.listdir(os.path.join(basedir, folder)):
+                if not re.match(r"temp\d+_input$", fn):
+                    continue
+                with open(os.path.join(basedir, folder, fn), encoding="utf-8") as f:
+                    v = int(f.read().strip()) / 1000.0
+                if plausible_c(v) and (best is None or v > best):
+                    best = v
+        except (OSError, ValueError):
+            continue                                        # a sensor that disappears between two reads is skipped
+    return round(best, 1) if best is not None else None
+
+
+def windows_cpu_temp(run=subprocess.run):
+    """The ACPI thermal zone's temperature (°C) through WMI, or None: no zone, a zone that answers 0, or a Windows
+    without the cmdlet.  The fallback for a machine without the counter set, so it costs a process and is asked
+    rarely; the value is in tenths of kelvin, which is also how a zone with nothing to say answers 0."""
+    try:
+        out = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", WIN_TEMP_PS],
+                  capture_output=True, timeout=15,
+                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        lines = out.stdout.decode(errors="ignore").split()
+        raw = int(lines[-1]) if lines else 0
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    c = raw / 10.0 - 273.15 if raw > 0 else None
+    return round(c, 1) if plausible_c(c) else None
+
+
+# Windows' counter set publishes what the zone's own _TMP method answers - ACPI's tenths of a degree KELVIN - as if it
+# were Celsius: the high-precision counter prints the raw number and the plain one its tenths, so both have to be
+# turned back into kelvin before the subtraction that makes them degrees.  Measured on the MSI at one instant: the two
+# counters printed 3242 and 324, the WMI class beside them said 324.2 K, and with twelve threads at 100 % the counters
+# printed 3700 - 96.9 °C, which is where a laptop's processor at full tilt belongs, while the counter called it 37.0.
+PDH_TEMP_COUNTERS = ((r"\Thermal Zone Information(*)\High Precision Temperature", 10.0),      # raw -> kelvin
+                     (r"\Thermal Zone Information(*)\Temperature", 1.0))
+PDH_FMT_DOUBLE, PDH_MORE_DATA = 0x00000200, -2147481646                                    # 0x800007D2
+
+
+class _PdhValue(ctypes.Structure):
+    _fields_ = [("cstatus", ctypes.c_uint32), ("pad", ctypes.c_uint32), ("double_value", ctypes.c_double)]
+
+
+class _PdhItem(ctypes.Structure):
+    _fields_ = [("string_index", ctypes.c_size_t), ("value", _PdhValue)]
+
+
+class PdhCpuTemp:
+    """The hottest ACPI thermal zone in °C through pdh.dll, or None where the machine has no such counter - said once:
+    `off` then stops the asking, because a Windows Server has no thermal zone and never will."""
+
+    def __init__(self, lib=None):
+        self.lib = lib or ctypes.windll.pdh
+        self.counters, self.buf, self.ok, self.off = [], None, False, False
+        try:
+            query = ctypes.c_void_p()
+            if self.lib.PdhOpenQueryW(None, 0, ctypes.byref(query)) != 0:
+                self.off = True
+                return
+            self.query = query
+            for path, scale in PDH_TEMP_COUNTERS:
+                handle = ctypes.c_void_p()
+                if self.lib.PdhAddEnglishCounterW(query, path, 0, ctypes.byref(handle)) == 0:
+                    self.counters.append((handle, scale))
+            self.ok = bool(self.counters)
+        except (AttributeError, OSError):
+            pass
+        self.off = not self.ok
+
+    def read(self):
+        if self.off:
+            return None
+        best = None
+        try:
+            if self.lib.PdhCollectQueryData(self.query) != 0:
+                return None
+            for handle, scale in self.counters:
+                size, count = ctypes.c_uint32(0), ctypes.c_uint32(0)
+                if self.lib.PdhGetFormattedCounterArrayW(handle, PDH_FMT_DOUBLE, ctypes.byref(size),
+                                                         ctypes.byref(count), None) not in (0, PDH_MORE_DATA):
+                    continue
+                if not count.value:
+                    continue
+                if self.buf is None or len(self.buf) < size.value:
+                    self.buf = ctypes.create_string_buffer(size.value)
+                if self.lib.PdhGetFormattedCounterArrayW(handle, PDH_FMT_DOUBLE, ctypes.byref(size),
+                                                         ctypes.byref(count), self.buf) != 0:
+                    continue
+                for item in ctypes.cast(self.buf, ctypes.POINTER(_PdhItem * count.value)).contents:
+                    v = item.value.double_value / scale - 273.15
+                    if item.value.cstatus in (0, 1) and plausible_c(v) and (best is None or v > best):
+                        best = v
+        except (AttributeError, OSError, ValueError):
+            self.off = True
+            return None
+        return round(best, 1) if best is not None else None
+
+
+class CpuTemp:
+    """The processor temperature, once a second, from a source asked far less often: the answer of the last question
+    stands until the next one.  `read()` never raises."""
+
+    LINUX_GAP, WIN_GAP, WIN_MAX_TRIES = 10.0, 30.0, 3
+
+    def __init__(self, win=windows_cpu_temp, lin=linux_cpu_temp, pdh=None):
+        self.win, self.lin = win, lin
+        self.pdh = pdh if pdh is not None else (PdhCpuTemp() if os.name == "nt" else None)
+        self.value = None
+        self.src = None
+        self.next = 0.0
+        self.tries = 0
+        self.off = False
+
+    def read(self):
+        """The temperature, with `src` saying which sensor answered: a card showing a thermal zone's degrees has to
+        be able to say that they are the zone's and not the die's."""
+        if self.off:
+            return None
+        now = time.monotonic()
+        if self.pdh is not None:
+            v = self.pdh.read()                                 # a pull from a cache: every second, like the rest
+            if plausible_c(v):
+                self.value, self.src = v, "acpi zone"
+                return self.value
+        if now < self.next:
+            return self.value
+        nt = os.name == "nt"
+        self.next = now + (self.WIN_GAP if nt else self.LINUX_GAP)
+        try:
+            v = self.win() if nt else self.lin()
+        except Exception:                                     # noqa: BLE001 - a monitor outlives its source
+            return self.value
+        if plausible_c(v):
+            self.value, self.src = v, ("wmi zone" if nt else "hwmon")
+        elif nt and (self.pdh is None or self.pdh.off):        # a zone that keeps silent here keeps silent
+            self.tries += 1
+            if self.tries >= self.WIN_MAX_TRIES:
+                self.off = True
+        return self.value
+
+
 class Telemetry:
     def __init__(self, extra=None, gpu_index=0, gpu_indices=None, amd=False):
         """`extra()` -> dict of more series to record each second (the server's tok/s).  `gpu_index`: the card the
@@ -1754,6 +1930,7 @@ class Telemetry:
             "psutil": self.ps is not None,
         }
         self._disk_prev = None
+        self.cpu_temp = CpuTemp()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -1789,6 +1966,10 @@ class Telemetry:
                 g["util"] = sum(u) / len(u) if u else None
                 t = vals("temp")
                 g["temp"] = max(t) if t else None
+                # a clock is not additive either: the top-level figure is the fastest card's, as temp is the hottest
+                for k in ("clock_mhz", "mem_clock_mhz", "clock_max_mhz", "mem_clock_max_mhz"):
+                    v = vals(k)
+                    g[k] = max(v) if v else None
                 # A link is not additive.  The top-level gpu_pcie_* fields stay card 0's reading (their meaning since #112); the card whose
                 # link is the slowest is named apart in gpu_pcie_bottleneck below, and each card's own link is in "gpus".
                 s["gpus"] = [{"index": i, "name": reader.name(), "util": r.get("util"), "mem_used": r.get("mem_used"),
@@ -1797,6 +1978,9 @@ class Telemetry:
                               "pcie_gen": r.get("pcie_gen"), "pcie_gen_max": r.get("pcie_gen_max"),
                               "pcie_width": r.get("pcie_width"), "pcie_width_max": r.get("pcie_width_max"),
                               "pcie_rx_mb": r.get("pcie_rx_mb"), "pcie_tx_mb": r.get("pcie_tx_mb"),
+                              "clock_mhz": r.get("clock_mhz"), "mem_clock_mhz": r.get("mem_clock_mhz"),
+                              "clock_max_mhz": r.get("clock_max_mhz"),
+                              "mem_clock_max_mhz": r.get("mem_clock_max_mhz"),
                               "pcie_own_gen": r.get("pcie_own_gen"), "pcie_path": r.get("pcie_path")}
                              for (i, r), (_, reader) in zip(reads, self.gpus)]
             s.update({f"gpu_{k}": v for k, v in g.items()})
@@ -1812,6 +1996,8 @@ class Telemetry:
             s["cpu"] = self.fallback.cpu()
             s["ram_used"], s["ram_total"] = self.fallback.ram()
         s["disk_read_mb"], s["disk_write_mb"] = self._disk()
+        s["cpu_temp"] = self.cpu_temp.read()
+        s["cpu_temp_src"] = self.cpu_temp.src
         if self.extra:
             try:
                 s.update(self.extra())
@@ -1843,7 +2029,8 @@ class Telemetry:
                 continue
             with self.lock:
                 self.now = s
-                for k in ("gpu_util", "gpu_mem_used", "gpu_temp", "gpu_power", "gpu_pcie_rx_mb", "cpu", "ram_used",
+                for k in ("gpu_util", "gpu_mem_used", "gpu_temp", "gpu_power", "gpu_pcie_rx_mb", "gpu_pcie_tx_mb",
+                          "gpu_clock_mhz", "gpu_mem_clock_mhz", "cpu", "cpu_temp", "ram_used",
                           "disk_read_mb", "tok_s", "prefill_tok_s_mean"):
                     v = s.get(k)
                     self.hist[k].append(round(v, 2) if isinstance(v, float) else v)
