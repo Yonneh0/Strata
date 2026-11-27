@@ -57,7 +57,8 @@ class GpuNote(unittest.TestCase):
                   " power: [$('mv-power').innerHTML, $('ms-power').textContent, $('ms-power').title],"
                   " temp: [$('mv-power').innerHTML, $('sn-sp-power-temp').textContent, $('sn-sp-power-temp').title],"
                   " pcie: [$('sn-sp-gpu-pcie').textContent, $('sn-sp-gpu-pcie').title],"
-                  " ram: [$('mv-ram').innerHTML, $('ms-ram').textContent, $('ms-ram').title, $('sn-sp-ram').textContent]}));")
+                  " ram: [$('mv-ram').innerHTML, $('ms-ram').textContent, $('ms-ram').title, $('sn-sp-ram').textContent],"
+                  " vram: $('sn-sp-vram').textContent}));")
         return run_node(script)
 
     MAC_HW = {"gpu_util": 95, "gpu_mem_used": 88_000_000_000, "gpu_mem_total": 131_000_000_000, "gpu_temp": None,
@@ -72,7 +73,7 @@ class GpuNote(unittest.TestCase):
         self.assertEqual(cards["ram"][1], "2 × 32 GB DDR4-2667 · dual channel")
         self.assertIn("rated 3200 MT/s, so this machine is not running its memory at the speed they are made for",
                      cards["ram"][2], "sticks running slower than they are rated is a setting, and the card says so")
-        self.assertEqual(cards["ram"][3], "min 49 · max 50 · avg 49%", "the share of it in use, over the minute of samples")
+        self.assertEqual(cards["ram"][3], "min 49 · max 50%", "the share of it in use, over the minute of samples")
 
     def test_the_memory_card_says_why_when_the_firmware_keeps_its_sticks_from_us(self):
         # Linux hands the firmware's stick details only to root, and a Windows whose WMI did not answer is in the same
@@ -82,7 +83,14 @@ class GpuNote(unittest.TestCase):
                           "system hands that out only to root."}
         cards = self.cards(hw, {}, h={"ram_used": [hw["ram_used"]]})
         self.assertIn("read from the machine's firmware", cards["ram"][1])
-        self.assertEqual(cards["ram"][3], "min 82 · max 82 · avg 82%")
+        self.assertEqual(cards["ram"][3], "min 82 · max 82%")
+
+    def test_the_vram_graph_leaves_its_line_empty(self):
+        # a card that runs at its ceiling by design: min and max of a series that never leaves it are noise, and the
+        # memory clock that does vary is printed beside the big number instead
+        hw = {"gpu_util": 40, "gpu_mem_used": 30_200_000_000, "gpu_mem_total": 34_359_738_368}
+        cards = self.cards(hw, {}, h={"gpu_mem_used": [30_200_000_000, 30_300_000_000]})
+        self.assertEqual(cards["vram"], "")
 
     def test_a_named_mac_gpu_explains_every_empty_reading_of_its_two_cards(self):
         cards = self.cards(self.MAC_HW, self.MAC_ST)
@@ -106,7 +114,7 @@ class GpuNote(unittest.TestCase):
         hw = {"gpu_power": 210, "gpu_power_limit": 450, "gpu_temp": 61, "gpu_pcie_gen": 5, "gpu_pcie_gen_max": 5,
               "gpu_pcie_width": 16, "gpu_pcie_rx_mb": 1800, "gpu_pcie_tx_mb": 300, "gpus": [{"index": 0}]}
         cards = self.cards(hw, {"gpu_name": "RTX 5090"}, h={"gpu_temp": [48, 55, 61], "gpu_pcie_rx_mb": [1200, 1500, 1800]})
-        self.assertEqual(cards["temp"][1], "61°C · min 48 · max 61 · avg 55°C")
+        self.assertEqual(cards["temp"][1], "61°C · min 48 · max 61°C")
         self.assertEqual(cards["pcie"][0], "Gen5 x16 · 1.8 GB/s")
         self.assertIn("The card sends 300.0 MB/s", cards["pcie"][1])
         self.assertIn("the same window the graph above is drawn from", cards["pcie"][1])

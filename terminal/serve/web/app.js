@@ -497,7 +497,7 @@ function statLine(id, values, d, unit, o) {
   if (!r) { el.textContent = op.none || ""; el.title = op.noneTitle || ""; return; }
   const div = op.div || 1, f = (x) => fmt(x / div, d);
   el.textContent = [op.head, op.brief ? `${f(r.now)}${unit}`
-                     : `${op.now ? `${f(r.now)}${unit} · ` : ""}min ${f(r.min)} · max ${f(r.max)} · avg ${f(r.avg)}${unit}`]
+                     : `${op.now ? `${f(r.now)}${unit} · ` : ""}min ${f(r.min)} · max ${f(r.max)}${unit}`]
                    .filter((x) => x).join(" · ");
   el.title = `${op.tip ? `${op.tip} ` : ""}The last ${r.n} seconds the server keeps (a sample each second) - the same window the graph above is drawn from.`;
 }
@@ -718,8 +718,9 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
             multi ? per((g) => (g.mem_used == null ? "–" : `${gb(g.mem_used)} GB`))
                   : eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached${eng.expert_cache_mib ? ` · ${gb(eng.expert_cache_mib * 1048576)} GB` : ""}`
                   : (st.gpu_note ? "not available on Windows AMD yet" : ""));
+  // no numbers under this one: the card runs at its ceiling by design, so the extremes of a series that never leaves
+  // it are noise - the shape above says all there is, and the clock the memory actually runs at is printed beside it
   spark("sp-vram", h.gpu_mem_used, hw.gpu_mem_total);
-  statLine("sp-vram", h.gpu_mem_used, 1, " GB", {div: 1073741824});
   setSide("vram", "clock", hw.gpu_mem_clock_mhz, "MHz", hw.gpu_mem_clock_max_mhz ? `of ${fmt(hw.gpu_mem_clock_max_mhz)}`
         : unread(hw.gpu_mem_clock_mhz) ? "not available" : "", unread(hw.gpu_mem_clock_mhz) ? st.gpu_note
         : `The fastest this card's memory runs is ${fmt(hw.gpu_mem_clock_max_mhz || 0)} MHz. The yellow line over the VRAM graph is the same series.`);
@@ -796,9 +797,11 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
               hw.disk_write_mb == null ? "" : `write ${fmt(hw.disk_write_mb, 1)} MB/s`);
   }
   spark("sp-disk", h.disk_read_mb);
-  const diskWin = stat(h.disk_read_mb), bigDisk = (diskWin ? diskWin.max : 0) >= 1000;
-  statLine("sp-disk", h.disk_read_mb, bigDisk ? 1 : 0, bigDisk ? " GB/s" : " MB/s",
-           {div: bigDisk ? 1024 : 1, tip: "What this machine reads from its disks - the experts that are not in VRAM come from here."});
+  // its own line of numbers went the same way as VRAM's: what the graph is, and over what window, belongs on the
+  // graph itself - the numbers a minute of disk reading swings between are not information
+  const diskGraph = $("sp-disk");
+  if (diskGraph) diskGraph.title = "What this machine reads from its disks - the experts that are not in VRAM come "
+    "from here. The last minute, a sample each second - the same window the graph is drawn from.";
   // power and temperature averages (#4968); after the cards block above so that block stays self-contained
   sampleHw(hw, !!live.state && live.state !== "idle" && live.state !== "unloaded", `${totals && totals.since}|${eng.model || ""}`);
 

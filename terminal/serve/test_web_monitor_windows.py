@@ -1,8 +1,9 @@
 """The Monitor tab's own windows: the numbers printed under its graphs, and the averages the page keeps.
 
-The line under a graph is the last minute of samples the server keeps (one each second) - the newest, the two extremes
-and their mean - so the numbers and the shape above them are one reading, and the Speed card's min and max come from
-the same window as its two lines. The power and temperature averages (#4968, PR by noahark) weigh each poll by the
+The line under a graph is the last minute of samples the server keeps (one each second) - the newest and the two
+extremes - so the numbers and the shape above them are one reading, and the Speed card's min and max come from the
+same window as its two lines. Two graphs print no line at all: VRAM and the disk read, whose extremes say nothing the
+shape above does not say better. The power and temperature averages (#4968, PR by noahark) weigh each poll by the
 seconds since the one before it (at most 2), leave idle time out, keep a missing sensor out of its own average and
 start afresh with a new totals window or another model; the temperature one is a tooltip of the power card's
 temperature graph, because that graph's own line is already the last minute. Tooltips are plain English title= text
@@ -119,7 +120,7 @@ statLine('sp-cpu-temp', [], 0, '°C', {now: true, none: 'no sensor here', noneTi
 process.stdout.write(JSON.stringify([$('sn-sp-power').textContent, $('sn-sp-power').title,
                                      $('sn-sp-gpu-pcie').textContent, $('sn-sp-gpu-pcie').title,
                                      $('sn-sp-cpu-temp').textContent, $('sn-sp-cpu-temp').title]));""")
-        self.assertEqual(got[0], "min 10 · max 200 · avg 90 W")
+        self.assertEqual(got[0], "min 10 · max 200 W")
         self.assertEqual(got[1], "The last 3 seconds the server keeps (a sample each second) - the same window the graph above is drawn from.")
         self.assertEqual(got[2], "Gen4 x16 · 1.8 GB/s")
         self.assertTrue(got[3].startswith("Traffic the GPU reads over its link. The last 2 seconds"))
@@ -159,6 +160,16 @@ process.stdout.write(JSON.stringify([$('sn-sp-power').textContent, $('sn-sp-powe
             self.assertIn(el, app)
         for card in metrics.split("{key: ")[1:]:
             self.assertTrue("graphs:" in card, card.split(",")[0])
+
+    def test_two_graph_rows_share_a_card_without_drawing_over_each_other(self):
+        css = (WEB / "app.css").read_text(encoding="utf-8")
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        self.assertIn("min-height: min-content", css,
+                      "a row of graphs cannot shrink under its own lines - which is how the lower graph came to sit on "
+                      "the numbers of the one above it")
+        self.assertNotIn('statLine("sp-vram"', app, "VRAM prints no numbers under its graph")
+        self.assertNotIn('statLine("sp-disk"', app, "nor does the disk read")
+        self.assertNotIn("avg ${f(r.avg)}", app, "a mean over the minute of samples is noise where the shape is the point")
 
 
 if __name__ == "__main__":
