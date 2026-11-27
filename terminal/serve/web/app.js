@@ -799,13 +799,16 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   // power and temperature averages (#4968); after the cards block above so that block stays self-contained
   sampleHw(hw, !!live.state && live.state !== "idle" && live.state !== "unloaded", `${totals && totals.since}|${eng.model || ""}`);
 
-  // the model and the run's averages, on the state card now: what this server is, what it runs with, and what it has
-  // been doing since it started - one line, because it reads as one sentence.  Tooltips are plain title= text, like
-  // the rest of this tab (#4968, from PR #4968 by noahark).
+  // the model and the run's averages, on the state card now: the card is headed by what it is watching - the model's
+  // own name, and the window it runs in - and the line under it says what the server has been doing since it started.
+  // One line, because it reads as one sentence.  Tooltips are plain title= text, like the rest of this tab
+  // (#4968, from PR #4968 by noahark).
+  const ctx = eng.max_context ? ctxfmt(eng.max_context) : null;
+  $("state-title").textContent = eng.model ? `${eng.model}${ctx ? ` · ${ctx}` : ""}` : "Model state";
+  $("state-title").title = eng.model ? `Which model this server runs - apps ask for it by this exact name.` +
+        `${ctx ? ` It runs with a ${ctx} context window.` : ""}` : "";
   const sf = (k, v, tip) => `<span class="sm-f"${tip ? ` title="${esc(tip)}"` : ""}><i>${esc(k)}</i> ${esc(v)}</span>`;
-  const bits = [`<span class="sm-name" title="${esc(eng.model || "")}">${esc(eng.model || "–")}</span>`,
-                eng.max_context ? sf("context", ctxfmt(eng.max_context), "The context window this model runs with. Apps ask for the model by the name beside it.") : null,
-                eng.version ? sf("engine", `v${eng.version}`, "The engine serving it.") : null];
+  const bits = [eng.version ? sf("engine", `v${eng.version}`, "The engine serving it.") : null];
   if (totals && totals.requests) {
     const read = totals.prompt_tokens - totals.reused;
     bits.push(sf("decode", totals.decode_ms > 0 && totals.output_tokens ? `${fmt(totals.output_tokens / (totals.decode_ms / 1000), 1)} t/s` : "–",

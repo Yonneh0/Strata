@@ -103,12 +103,12 @@ main { flex: 1; min-height: 0; display: flex; }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); grid-auto-rows: 1fr; gap: var(--st-s-4); }
 .metric-card { padding: var(--st-s-4) var(--st-s-5); display: flex; }   /* the card fills its grid cell, so its graphs can be pinned to its bottom */
 .metric-card .st-metric { flex: 1 1 auto; min-width: 0; }
-/* the model and the run's averages, one line under the state: the name is what the server is, the rest is what it has
-   been doing since it started.  It reads as a sentence, so the pieces are set with dots between them rather than as a
-   two-column table - and a sentence can break anywhere, which a table of eight rows could not do in a wide card. */
+/* the run's averages, one line under the state: the card is headed by the model's own name now, so what is printed
+   here is only what the server has been doing since it started.  It reads as a sentence, so the pieces are set with
+   dots between them rather than as a two-column table - and a sentence can break anywhere, which a table of eight rows
+   could not do in a wide card. */
 .state-model { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--st-s-3);
                font-size: var(--st-fs-sm); font-variant-numeric: tabular-nums; }
-.state-model .sm-name { font-weight: var(--st-fw-bold); overflow-wrap: anywhere; }
 .state-model .sm-f i { font-style: normal; color: var(--st-ink-muted); }
 .state-model .sm-dot { color: var(--st-ink-muted); opacity: .55; }
 

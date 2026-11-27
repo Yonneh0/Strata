@@ -132,7 +132,7 @@ process.stdout.write(JSON.stringify([$('sn-sp-power').textContent, $('sn-sp-powe
         self.assertNotIn("data-tip", app)
         self.assertNotIn("#st-tip", css)
         self.assertNotIn('tr("monitor.', app)
-        for text in ["The context window this model runs with. Apps ask for the model by the name beside it.",
+        for text in ["Which model this server runs - apps ask for it by this exact name.",
                      "Average answer speed since the server started: answer tokens divided by the time spent writing them. Waiting in the queue and reading the prompt are not counted.",
                      "Average prompt speed since the server started, counting only the tokens that were really read. What came from the cache is left out.",
                      "The average prompt and answer length of one request.",
@@ -147,6 +147,8 @@ process.stdout.write(JSON.stringify([$('sn-sp-power').textContent, $('sn-sp-powe
         app = (WEB / "app.js").read_text(encoding="utf-8")
         html = (WEB / "index.html").read_text(encoding="utf-8")
         self.assertIn('<div class="state-model" id="state-model"></div>', html)
+        self.assertIn('<span class="card-title" id="state-title">Model state</span>', html,
+                     "the card is headed by the model's name, and keeps these words until a model is loaded")
         metrics = block(app, "const METRICS = [", "];")
         self.assertNotIn('key: "model"', metrics, "the model is a line on the state card now, not a card of its own")
         self.assertLess(metrics.index('key: "speed"'), metrics.index('key: "gpu"'))
