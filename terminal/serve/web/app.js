@@ -767,8 +767,11 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
                         (multi ? "Traffic every card reads." : "Traffic the GPU reads over its link.") +
                         (st.gpu_note ? ` ${st.gpu_note}` : ""),
                    none: unread(hw.gpu_pcie_rx_mb) ? "not available" : "", noneTitle: st.gpu_note || ""};
+  // the link it reads over and what it is reading now, and nothing else: with a card moving ten gigabytes a second the
+  // same line had to carry min, max and avg as well, and it broke out of the card - the graph above is where the range
+  // belongs
   spark("sp-gpu-pcie", h.gpu_pcie_rx_mb);
-  statLine("sp-gpu-pcie", h.gpu_pcie_rx_mb, bigPcie ? 1 : 0, bigPcie ? " GB/s" : " MB/s", Object.assign({now: true}, pcieOpt));
+  statLine("sp-gpu-pcie", h.gpu_pcie_rx_mb, bigPcie ? 1 : 0, bigPcie ? " GB/s" : " MB/s", Object.assign({brief: true}, pcieOpt));
   // the processor's name beside its load, as the GPU's stands on the load card: which chip these degrees and this
   // share of busy time belong to is the first thing to know about a laptop's numbers
   setMetric("cpu", hw.cpu == null ? null : fmt(hw.cpu), "%",

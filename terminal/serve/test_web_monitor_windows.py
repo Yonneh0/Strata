@@ -114,14 +114,14 @@ process.stdout.write(JSON.stringify([$('sr-power').textContent, $('sn-sp-power-t
     def test_a_graph_line_names_its_window_and_nothing_else(self):
         got = run(self.code + """
 statLine('sp-power', [10, 200, 60], 0, ' W');
-statLine('sp-gpu-pcie', [1200, 1800], 1, ' GB/s', {div: 1024, head: 'Gen4 x16', now: true, tip: 'Traffic the GPU reads over its link.'});
+statLine('sp-gpu-pcie', [1200, 1800], 1, ' GB/s', {div: 1024, head: 'Gen4 x16', brief: true, tip: 'Traffic the GPU reads over its link.'});
 statLine('sp-cpu-temp', [], 0, '°C', {now: true, none: 'no sensor here', noneTitle: 'This machine has none.'});
 process.stdout.write(JSON.stringify([$('sn-sp-power').textContent, $('sn-sp-power').title,
                                      $('sn-sp-gpu-pcie').textContent, $('sn-sp-gpu-pcie').title,
                                      $('sn-sp-cpu-temp').textContent, $('sn-sp-cpu-temp').title]));""")
         self.assertEqual(got[0], "min 10 · max 200 · avg 90 W")
         self.assertEqual(got[1], "The last 3 seconds the server keeps (a sample each second) - the same window the graph above is drawn from.")
-        self.assertEqual(got[2], "Gen4 x16 · 1.8 GB/s · min 1.2 · max 1.8 · avg 1.5 GB/s")
+        self.assertEqual(got[2], "Gen4 x16 · 1.8 GB/s")
         self.assertTrue(got[3].startswith("Traffic the GPU reads over its link. The last 2 seconds"))
         self.assertEqual(got[4], "no sensor here")
         self.assertEqual(got[5], "This machine has none.")

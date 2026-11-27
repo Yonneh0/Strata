@@ -97,7 +97,7 @@ class GpuNote(unittest.TestCase):
               "gpu_pcie_width": 16, "gpu_pcie_rx_mb": 1800, "gpu_pcie_tx_mb": 300, "gpus": [{"index": 0}]}
         cards = self.cards(hw, {"gpu_name": "RTX 5090"}, h={"gpu_temp": [48, 55, 61], "gpu_pcie_rx_mb": [1200, 1500, 1800]})
         self.assertEqual(cards["temp"][1], "61°C · min 48 · max 61 · avg 55°C")
-        self.assertEqual(cards["pcie"][0], "Gen5 x16 · 1.8 GB/s · min 1.2 · max 1.8 · avg 1.5 GB/s")
+        self.assertEqual(cards["pcie"][0], "Gen5 x16 · 1.8 GB/s")
         self.assertIn("The card sends 300.0 MB/s", cards["pcie"][1])
         self.assertIn("the same window the graph above is drawn from", cards["pcie"][1])
 
