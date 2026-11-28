@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import serve.telemetry as t
@@ -77,6 +78,10 @@ class SampleRule(unittest.TestCase):
         tel.gpu = tel.gpus[0][1]
         tel.ps, tel.extra, tel._disk_prev = None, None, None
         tel.fallback = mock.Mock(cpu=lambda: None, ram=lambda: (None, None))
+        # This builds a Telemetry without __init__, so it declares every field sample() touches - including the stick
+        # facts' one-shot state. {} (not None) keeps it from shell-ing out to the real machine on a Windows.
+        tel.mem_facts, tel.mem_next, tel.mem_tries = {}, 0.0, 0
+        tel.cpu_temp = SimpleNamespace(read=lambda: None, src=None)   # the CPU line, inert here
         s = tel.sample()
         self.assertEqual((s["gpu_pcie_gen"], s["gpu_pcie_width"]), (5, 8))              # card 0's link
         self.assertEqual(s["gpu_power"], 200.0)                                          # additive fields add up
