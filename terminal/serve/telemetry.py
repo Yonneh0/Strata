@@ -1903,9 +1903,14 @@ def memory_facts(run=subprocess.run):
     # channels.  A firmware that says only "DIMM 1" has said nothing about channels, and gets none claimed.
     chan = {str(r.get("DeviceLocator") or "").split("DIMM")[0].strip(" -_") for r in rows}
     chan.discard("")
+    gibs = [round(r["Capacity"] / 2**30) for r in rows]
     facts = {"ram_sticks": len(rows),
-             "ram_stick_gib": round(max(r["Capacity"] for r in rows) / 2**30),
-             "ram_type": {18: "DDR2", 20: "DDR", 24: "DDR3", 26: "DDR4", 34: "DDR5"}.get(rows[0].get("SMBIOSMemoryType")),
+             "ram_stick_gibs": sorted(gibs),
+             # "2 × 32 GB" is only a true statement about every stick when they are all one size: a mixed kit says how
+             # many there are, and its tooltip is where the sizes themselves are told.
+             "ram_stick_gib": gibs[0] if len(set(gibs)) == 1 else None,
+             # SMBIOS MemoryDeviceType (DSP0134): 0x12 DDR, 0x13 DDR2, 0x18 DDR3, 0x1A DDR4, 0x22 DDR5.
+             "ram_type": {18: "DDR", 19: "DDR2", 24: "DDR3", 26: "DDR4", 34: "DDR5"}.get(rows[0].get("SMBIOSMemoryType")),
              "ram_mt_s": max(cfg) if cfg else None,
              "ram_rated_mt_s": max(rated) if rated else None}
     if chan:
@@ -1968,6 +1973,7 @@ class Telemetry:
         self._disk_prev = None
         self.cpu_temp = CpuTemp()
         self.mem_facts = None            # the sticks themselves, for the Memory card's line
+        self.mem_tries, self.mem_next = 0, 0.0
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -1987,6 +1993,20 @@ class Telemetry:
             return None, None
         dt = t - prev[0]
         return (c.read_bytes - prev[1]) / dt / 2**20, (c.write_bytes - prev[2]) / dt / 2**20
+
+    def _ask_mem_facts(self, now):
+        """Once, because a machine's memory does not change while it runs - but a Windows that the machine started
+        itself can sample before WMI has finished starting, and the card must not stay blank for a whole run over
+        that: an empty answer is asked again for a while before the silence is accepted."""
+        if self.mem_facts is not None or now < self.mem_next:
+            return
+        # Linux keeps the sticks behind root, so only a Windows is asked at all
+        f = memory_facts() if os.name == "nt" else {}
+        self.mem_tries += 1
+        if f or self.mem_tries >= 3:
+            self.mem_facts = f
+        else:
+            self.mem_next = now + 30.0
 
     def sample(self):
         s = {}
@@ -2032,9 +2052,8 @@ class Telemetry:
         else:
             s["cpu"] = self.fallback.cpu()
             s["ram_used"], s["ram_total"] = self.fallback.ram()
-        if self.mem_facts is None:                          # once: a machine's memory does not change while it runs
-            self.mem_facts = memory_facts() if os.name == "nt" else {}
-        s.update(self.mem_facts)
+        self._ask_mem_facts(time.monotonic())
+        s.update(self.mem_facts or {})
         s["disk_read_mb"], s["disk_write_mb"] = self._disk()
         s["cpu_temp"] = self.cpu_temp.read()
         s["cpu_temp_src"] = self.cpu_temp.src

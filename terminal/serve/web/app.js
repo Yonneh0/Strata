@@ -488,7 +488,7 @@ function pcieLink(hw) {
 function stat(values) {
   const v = (values || []).filter((x) => x != null && Number.isFinite(x));
   if (!v.length) return null;
-  return {now: v[v.length - 1], min: Math.min(...v), max: Math.max(...v), avg: v.reduce((a, b) => a + b, 0) / v.length, n: v.length};
+  return {now: v[v.length - 1], min: Math.min(...v), max: Math.max(...v), n: v.length};
 }
 function statLine(id, values, d, unit, o) {
   const el = $(`sn-${id}`);
@@ -501,7 +501,6 @@ function statLine(id, values, d, unit, o) {
                    .filter((x) => x).join(" · ");
   el.title = `${op.tip ? `${op.tip} ` : ""}The last ${r.n} seconds the server keeps (a sample each second) - the same window the graph above is drawn from.`;
 }
-/* A second printed number beside a card's big one: the SM clock over the load, the memory clock over the VRAM. */
 // the sticks themselves, from the machine's firmware: the share of memory in use says a machine is running out of
 // room, these say what the room is and how fast it runs - a stick rated faster than the machine runs it is worth
 // knowing about, because it is a setting and not a limit
@@ -509,11 +508,14 @@ function ramSticks(hw) {
   if (!hw.ram_sticks) return "";   // some operating systems keep the sticks behind root: the line stays blank
   const speed = hw.ram_mt_s ? `${hw.ram_type || "DDR"}-${hw.ram_mt_s}` : (hw.ram_type || "");
   const chan = hw.ram_channels ? ` · ${["", "single", "dual", "triple", "quad"][hw.ram_channels] || hw.ram_channels} channel` : "";
-  return `${hw.ram_sticks} × ${hw.ram_stick_gib} GB ${speed}${chan}`.replace(/ +/g, " ");
+  const size = hw.ram_stick_gib ? `${hw.ram_sticks} × ${hw.ram_stick_gib} GB` : `${hw.ram_sticks} sticks`;
+  return `${size} ${speed}${chan}`.replace(/ +/g, " ");
 }
 function ramSticksTip(hw) {
   if (!hw.ram_sticks) return "";
-  let s = `From the machine's firmware: ${hw.ram_sticks} stick${hw.ram_sticks > 1 ? "s" : ""} of ${hw.ram_stick_gib} GB`
+  const sizes = [...new Set(hw.ram_stick_gibs || [])].join(" GB + ") + " GB";
+  let s = `From the machine's firmware: ${hw.ram_sticks} stick${hw.ram_sticks > 1 ? "s" : ""} of `
+        + (hw.ram_stick_gib ? `${hw.ram_stick_gib} GB` : sizes)
         + (hw.ram_type ? ` ${hw.ram_type}` : "")
         + (hw.ram_mt_s ? `, running at ${hw.ram_mt_s} MT/s` : "");
   if (hw.ram_channels) s += `, one in each of ${hw.ram_channels} channels`;
@@ -523,6 +525,7 @@ function ramSticksTip(hw) {
   return s + ".";
 }
 
+/* A second printed number beside a card's big one: the SM clock over the load, the memory clock over the VRAM. */
 function setSide(card, id, value, unit, sub, why) {
   const v = $(`mv-${card}-${id}`);
   if (!v) return;
