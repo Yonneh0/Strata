@@ -67,6 +67,7 @@ class GpuNote(unittest.TestCase):
 
     def test_the_memory_card_prints_the_sticks_the_firmware_reports(self):
         hw = {"ram_used": 33_523_404_800, "ram_total": 68_553_834_496, "ram_sticks": 2, "ram_stick_gib": 32,
+              "ram_stick_gibs": [32, 32],
               "ram_type": "DDR4", "ram_mt_s": 2667, "ram_rated_mt_s": 3200, "ram_channels": 2}
         cards = self.cards(hw, {}, h={"ram_used": [hw["ram_used"], hw["ram_used"] + 500_000_000]})
         self.assertEqual(cards["ram"][0], "31.2<small>/ 64 GB</small>", "the totals the machine has, not a percentage")
@@ -74,6 +75,15 @@ class GpuNote(unittest.TestCase):
         self.assertIn("rated 3200 MT/s, so this machine is not running its memory at the speed they are made for",
                      cards["ram"][2], "sticks running slower than they are rated is a setting, and the card says so")
         self.assertEqual(cards["ram"][3], "min 49 · max 50%", "the share of it in use, over the minute of samples")
+
+    def test_a_memory_of_two_sizes_says_how_many_sticks_rather_than_the_biggest(self):
+        # "2 × 32 GB" of a 16 + 32 kit is a number the machine never had: the line keeps the count, and the tooltip
+        # is where the sizes themselves are told
+        hw = {"ram_used": 33_523_404_800, "ram_total": 68_553_834_496, "ram_sticks": 2, "ram_stick_gib": None,
+              "ram_stick_gibs": [16, 32], "ram_type": "DDR4", "ram_mt_s": 2667, "ram_channels": 2}
+        cards = self.cards(hw, {}, h={"ram_used": [hw["ram_used"], hw["ram_used"]]})
+        self.assertEqual(cards["ram"][1], "2 sticks DDR4-2667 · dual channel")
+        self.assertIn("2 sticks of 16 GB + 32 GB DDR4", cards["ram"][2])
 
     def test_the_memory_line_is_blank_when_the_firmware_keeps_its_sticks_from_us(self):
         # Linux hands the stick details only to root: nothing is printed there. The card keeps its totals and its
