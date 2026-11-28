@@ -156,27 +156,34 @@ class CpuFromHwmon(unittest.TestCase):
 
 
 class CpuTempSource(unittest.TestCase):
+    # CpuTemp builds the machine's own counter when it is given none, so a test that wants no counter has to say so:
+    # the real one answers on a Windows, and those tests would watch this desk's sensors instead of their own.
+    NO_COUNTER = SimpleNamespace(off=True, read=lambda: None)
+
     def test_the_counter_that_answers_is_named_as_the_counter(self):
         c = CpuTemp(win=lambda: 60.0, lin=lambda: 60.0, pdh=SimpleNamespace(off=False, read=lambda: 71.5))
         self.assertEqual(c.read(), 71.5)
         self.assertEqual(c.src, "acpi zone", "a thermal zone's degrees are the zone's, and the page has to be able to say so")
 
     def test_the_sensor_that_answers_is_named_as_the_sensor(self):
-        c = CpuTemp(win=lambda: 60.0, lin=lambda: 52.5, pdh=None)
-        self.assertEqual([c.read(), c.read()], [52.5, 52.5])
+        c = CpuTemp(win=lambda: 60.0, lin=lambda: 52.5, pdh=self.NO_COUNTER)
+        with mock.patch("serve.telemetry.os.name", "posix"):      # which source is asked is the machine's operating
+            got = [c.read(), c.read()]                            # system's choice, so the test says which machine
+        self.assertEqual(got, [52.5, 52.5])
         self.assertEqual(c.src, "hwmon")
 
     def test_the_answer_stands_between_two_asks(self):
         asked = []
-        c = CpuTemp(win=lambda: 60.0, lin=lambda: (asked.append(1), 52.5)[1], pdh=None)
-        c.read()
-        for _ in range(5):
+        c = CpuTemp(win=lambda: 60.0, lin=lambda: (asked.append(1), 52.5)[1], pdh=self.NO_COUNTER)
+        with mock.patch("serve.telemetry.os.name", "posix"):
             c.read()
+            for _ in range(5):
+                c.read()
         self.assertEqual(len(asked), 1, "the card is refreshed every second; the sensor is asked every ten")
 
     def test_a_machine_with_neither_stops_being_asked(self):
         asked = []
-        c = CpuTemp(win=lambda: asked.append(1) or None, lin=None, pdh=None)
+        c = CpuTemp(win=lambda: asked.append(1) or None, lin=None, pdh=self.NO_COUNTER)
         with mock.patch("serve.telemetry.os.name", "nt"):     # a silent thermal zone is a Windows answer, not a Linux one
             for _ in range(5):
                 c.next = 0.0            # the gap between two asks, passed without waiting for the clock
@@ -187,7 +194,7 @@ class CpuTempSource(unittest.TestCase):
     def test_a_source_that_raises_is_survived(self):
         def boom():
             raise RuntimeError("no WMI today")
-        c = CpuTemp(win=boom, lin=boom, pdh=None)
+        c = CpuTemp(win=boom, lin=boom, pdh=self.NO_COUNTER)
         c.next = 0.0
         self.assertIsNone(c.read())
 
